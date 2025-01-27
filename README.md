@@ -6,5 +6,5 @@ signature while cryptographically preventing abuse.
 
 ## Specification
 
-A rough and basic specification is provided in [./spec.txt](./spec.txt),
+A rough and basic specification is provided in [./spec.md](./spec.md),
 however this is only used as a basis to plan the implementation itself
