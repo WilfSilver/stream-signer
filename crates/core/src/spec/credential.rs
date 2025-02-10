@@ -1,4 +1,5 @@
-use identity_credential::credential::Credential;
+pub use identity_credential;
+pub use identity_credential::credential::Credential;
 use serde::{Deserialize, Serialize};
 
 /// Credential information of either the definition (with all the information),

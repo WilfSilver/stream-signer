@@ -5,14 +5,14 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-/// Stores the defined credentials so it can be easily accessed later on
-#[derive(Debug, Default)]
-pub struct CredentialStore(HashMap<String, Credential>);
-
 pub enum CredentialError {
     Invalid(&'static str),
     Unknown(String),
 }
+
+/// Stores the defined credentials so it can be easily accessed later on
+#[derive(Debug, Default)]
+pub struct CredentialStore(HashMap<String, Credential>);
 
 impl CredentialStore {
     pub fn normalise(&mut self, opt: CredentialOpt) -> Result<&Credential, CredentialError> {

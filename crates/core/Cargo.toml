@@ -10,11 +10,16 @@ verifying = []
 
 [dependencies]
 base64 = "0.22.1"
+glib = "0.20.7"
 gstreamer = "0.23.4"
+gstreamer-app = "0.23.4"
+gstreamer-video = "0.23.4"
 identity_credential = "1.5.0"
+image = { version = "0.25", default-features = false }
+pqc_dilithium = { version = "0.2.0", features = ["mode5"] }
 rust-lapper = { version = "1.1.0", features = ["with_serde"] }
 serde = "1.0.217"
 serde_json = "1.0.138"
 sorted-vec = "0.8.6"
 srtlib = "0.2.0"
-vid_frame_iter = "0.2.0"
+v = "0.1.0"

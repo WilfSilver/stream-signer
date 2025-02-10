@@ -1,9 +1,8 @@
 mod credential;
 mod sign_file;
 pub mod spec;
+mod video;
 
-pub use credential::*;
-pub use identity_credential;
-pub use sign_file::*;
-
-pub use vid_frame_iter::VideoFrameIterBuilder;
+pub use crate::credential::*;
+pub use crate::sign_file::*;
+pub use video::*;
