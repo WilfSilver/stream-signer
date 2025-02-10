@@ -3,7 +3,7 @@ use std::{
     path::Path,
 };
 
-use crate::spec::Signature;
+use crate::spec::SignatureInfo;
 use rust_lapper::{Interval, Lapper};
 use srtlib::{ParsingError, Subtitle, Subtitles, Timestamp as SrtTimestamp};
 
@@ -18,6 +18,39 @@ const ONE_HOUR_MILLIS: u32 = 60 * ONE_MINUTE_MILLIS;
 /// and `srtlib::Timestamp`
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timestamp(u32);
+
+impl Timestamp {
+    pub const fn new(milliseconds: u32) -> Self {
+        Self(milliseconds)
+    }
+
+    /// Creates a timestamp from the frame index, when given the frame rate
+    ///
+    /// TODO: Check the start offset is correct
+    ///
+    /// - `fps` should be: (number of frames, number of seconds)
+    /// - `start_offset` should be the number of milliseconds to start the video at
+    pub fn from_frames(frame: usize, fps: (u64, u64), start_offset: Option<f64>) -> (Self, usize) {
+        let fps = (fps.0 as f64, fps.1 as f64);
+
+        let milliseconds = start_offset.unwrap_or_default() + (fps.1 * frame as f64) / fps.0;
+
+        (
+            (milliseconds as u32).into(),
+            ((milliseconds % 1.) * fps.0 / fps.1) as usize,
+        )
+    }
+
+    /// Converts the current milliseconds into the index to use for the frames
+    ///
+    /// - `fps` should be: (number of frames, number of seconds)
+    /// - `start_offset` should be the number of milliseconds to start the video at
+    pub fn into_frames(&self, fps: (u64, u64), start_offset: Option<f64>) -> usize {
+        let fps = (fps.0 as f64, fps.1 as f64);
+
+        (fps.0 * (self.0 as f64 - start_offset.unwrap_or_default()) / fps.1) as usize
+    }
+}
 
 impl From<Timestamp> for u32 {
     fn from(value: Timestamp) -> Self {
@@ -82,7 +115,7 @@ impl From<serde_json::Error> for ParseError {
     }
 }
 
-type SignedInterval = Interval<u32, Vec<Signature>>;
+type SignedInterval = Interval<u32, Vec<SignatureInfo>>;
 
 /// Wrapper type for the Interval storing the time range and signatures which
 /// have signed that interval of video
@@ -90,7 +123,7 @@ type SignedInterval = Interval<u32, Vec<Signature>>;
 pub struct SignedChunk(SignedInterval);
 
 impl SignedChunk {
-    pub fn new(from: Timestamp, to: Timestamp, signature: Vec<Signature>) -> Self {
+    pub fn new(from: Timestamp, to: Timestamp, signature: Vec<SignatureInfo>) -> Self {
         SignedChunk(SignedInterval {
             start: from.into(),
             stop: to.into(),
@@ -151,11 +184,11 @@ impl PartialEq for SignedChunk {
 /// applied to to make it easy to iterate over
 pub struct SignatureWithRange<'a> {
     pub range: Range<Timestamp>,
-    pub signature: &'a Signature,
+    pub signature: &'a SignatureInfo,
 }
 
 impl<'a> SignatureWithRange<'a> {
-    pub fn new(range: Range<Timestamp>, signature: &'a Signature) -> Self {
+    pub fn new(range: Range<Timestamp>, signature: &'a SignatureInfo) -> Self {
         SignatureWithRange { range, signature }
     }
 }
@@ -184,7 +217,7 @@ impl<'a> SignatureWithRange<'a> {
 /// ```
 ///
 #[derive(Debug)]
-pub struct SignFile(Lapper<u32, Vec<Signature>>);
+pub struct SignFile(Lapper<u32, Vec<SignatureInfo>>);
 
 impl SignFile {
     pub fn new() -> Self {
