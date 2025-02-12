@@ -24,6 +24,9 @@ impl From<glib::Error> for VideoError {
     }
 }
 
+/// Enables building, signing and verifying videos outputing to a given [SignFile]
+///
+/// For signing, you can use [SignedVideoBuilder::sign]
 #[derive(Debug)]
 pub struct SignedVideoBuilder {
     uri: String,
@@ -69,12 +72,37 @@ impl SignedVideoBuilder {
 
     /// Returns the fps which has been set or the default
     ///
-    /// TODO: Change this to get from the current pipeline
+    // TODO: Change this to get from the current pipeline
     pub fn fps_or_default(&self) -> (u64, u64) {
         self.fps.unwrap_or((60, 1))
     }
 
-    /// Signs the current built video writing to the sign_file
+    /// Signs the current built video writing to the sign_file by calling
+    /// the provided `sign_with` function for every frame with its timeframe
+    /// and rgb frame.
+    ///
+    /// If the function returns some [SignInfo], it will use the information to
+    /// sign the chunk form the `start` property to the current timestamp.
+    ///
+    /// For example if you wanted to sign a video in 100ms second intervals you
+    /// could do the following
+    ///
+    /// ```
+    /// use sign_streamer::{SignedVideoBuilder, SignInfo};
+    ///
+    /// let mut builder = SignedVideoBuilder::from_uri("https://example.com/video_feed");
+    ///
+    /// builder.sign(|time, _frame| {
+    ///   ...
+    ///   if *time % 100 == 0 && *time != 0 {
+    ///     vec![
+    ///       SignInfo::new((*time - 100).into(), my_credential.into(), my_keypair),
+    ///     ]
+    ///   } else {
+    ///     vec![]
+    ///   }
+    /// })
+    /// ```
     #[cfg(feature = "signing")]
     pub fn sign<F>(&mut self, sign_with: F) -> Result<(), VideoError>
     where
@@ -97,6 +125,7 @@ impl SignedVideoBuilder {
             frame_buffer.push_back(frame);
             let mut chunks: HashMap<Timestamp, SignedChunk> = HashMap::default();
             for si in sign_info {
+                // TODO: Add protections if the timeframe is too short
                 let start = si.start;
 
                 // TODO: Create custom error type
@@ -105,14 +134,15 @@ impl SignedVideoBuilder {
                     .checked_sub(i - excess_frames - start.into_frames(fps, self.start_offset))
                     .ok_or(VideoError::OutOfRange((start, timestamp)))?;
 
+                // TODO: Potentially optimise by grouping sign info with same
+                // bounds
                 let mut frames_buf: Vec<u8> = Vec::with_capacity(
                     size.x as usize * size.y as usize * (frame_buffer.len() - i),
                 );
                 for f in frame_buffer.range(i..frame_buffer.len()) {
+                    // TODO: Deal with the sign crop and stuff
                     frames_buf.extend_from_slice(
-                        f.as_flat()
-                            .image_slice()
-                            .ok_or(VideoError::OutOfRange((start, timestamp)))?,
+                        f.as_flat().as_slice(), //.ok_or(VideoError::OutOfRange((start, timestamp)))?,
                     );
                 }
 

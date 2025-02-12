@@ -11,6 +11,18 @@ pub enum CredentialOpt {
     Definition(Credential),
 }
 
+impl From<Credential> for CredentialOpt {
+    fn from(value: Credential) -> Self {
+        CredentialOpt::Definition(value)
+    }
+}
+
+impl From<CredentialId> for CredentialOpt {
+    fn from(value: CredentialId) -> Self {
+        CredentialOpt::Ref(value)
+    }
+}
+
 /// Stores the id which references a previously defiend definition of the
 /// credential
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

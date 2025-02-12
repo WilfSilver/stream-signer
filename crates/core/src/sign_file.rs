@@ -198,7 +198,7 @@ impl<'a> SignatureWithRange<'a> {
 ///
 /// Creating a signature file
 ///
-/// ```rs
+/// ```
 /// let mut sf = SignFile::new();
 ///
 /// sf.push(chunk);
@@ -208,7 +208,7 @@ impl<'a> SignatureWithRange<'a> {
 ///
 /// Or reading signatures for a given time frame
 ///
-/// ```rs
+/// ```
 /// let sf = SignFile::from_file("./mysignatures.srt")
 ///
 /// for s in sf.get_signatures_at(2000) { // Get at 2 seconds mark
@@ -245,7 +245,7 @@ impl SignFile {
 
     /// Inserts a new signed chunk into the signatures list
     ///
-    /// ```rs
+    /// ```
     /// let mut sf = SignFile::new();
     ///
     /// sf.push(SignedChunk::new(0.into(), 1000.into(), vec![signature]));
@@ -260,7 +260,7 @@ impl SignFile {
     /// Find all the signatures which are applied to the given timestamp and
     /// the full ranges in which they apply for.
     ///
-    /// ```rs
+    /// ```
     /// let sf = SignFile::from_file("./mysignatures.srt")
     ///
     /// for s in sf.get_signatures_at(2000) { // Get at 2 seconds mark
@@ -284,7 +284,7 @@ impl SignFile {
 
     /// Writes the current store to a specified srt file
     ///
-    /// ```rs
+    /// ```
     /// let mut sf = SignFile::new();
     ///
     /// sf.push(SignedChunk::new(0.into(), 1000.into(), vec![signature]));

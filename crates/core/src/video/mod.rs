@@ -4,3 +4,5 @@ mod frame_iter;
 mod sign;
 
 pub use builder::*;
+#[cfg(feature = "signing")]
+pub use sign::*;

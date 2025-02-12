@@ -1,4 +1,4 @@
-//! This code is taken from https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter
+//! This code is taken from <https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter>
 
 use std::iter::FusedIterator;
 
