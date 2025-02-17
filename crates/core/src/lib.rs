@@ -1,8 +1,8 @@
 mod credential;
-mod sign_file;
+pub mod file;
 pub mod spec;
-mod video;
+pub mod video;
 
 pub use crate::credential::*;
-pub use crate::sign_file::*;
-pub use video::*;
+pub use crate::file::{time, SignFile};
+pub use video::SignPipeline;

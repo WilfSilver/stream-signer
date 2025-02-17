@@ -3,117 +3,12 @@ use std::{
     path::Path,
 };
 
-use crate::spec::SignatureInfo;
 use rust_lapper::{Interval, Lapper};
-use srtlib::{ParsingError, Subtitle, Subtitles, Timestamp as SrtTimestamp};
+use srtlib::{Subtitle, Subtitles, Timestamp as SrtTimestamp};
 
-/// The number of milliseconds in a second.
-const ONE_SECOND_MILLIS: u32 = 1000;
-/// The number of milliseconds in a minute.
-const ONE_MINUTE_MILLIS: u32 = 60 * ONE_SECOND_MILLIS;
-/// The number of milliseconds in an hour.
-const ONE_HOUR_MILLIS: u32 = 60 * ONE_MINUTE_MILLIS;
+use crate::spec::SignatureInfo;
 
-/// Wrapper for the timestamp to help converting between `u32` (the milliseconds)
-/// and `srtlib::Timestamp`
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Timestamp(u32);
-
-impl Timestamp {
-    pub const fn new(milliseconds: u32) -> Self {
-        Self(milliseconds)
-    }
-
-    /// Creates a timestamp from the frame index, when given the frame rate
-    ///
-    /// TODO: Check the start offset is correct
-    ///
-    /// - `fps` should be: (number of frames, number of seconds)
-    /// - `start_offset` should be the number of milliseconds to start the video at
-    pub fn from_frames(frame: usize, fps: (u64, u64), start_offset: Option<f64>) -> (Self, usize) {
-        let fps = (fps.0 as f64, fps.1 as f64);
-
-        let milliseconds = start_offset.unwrap_or_default() + (fps.1 * frame as f64) / fps.0;
-
-        (
-            (milliseconds as u32).into(),
-            ((milliseconds % 1.) * fps.0 / fps.1) as usize,
-        )
-    }
-
-    /// Converts the current milliseconds into the index to use for the frames
-    ///
-    /// - `fps` should be: (number of frames, number of seconds)
-    /// - `start_offset` should be the number of milliseconds to start the video at
-    pub fn into_frames(&self, fps: (u64, u64), start_offset: Option<f64>) -> usize {
-        let fps = (fps.0 as f64, fps.1 as f64);
-
-        (fps.0 * (self.0 as f64 - start_offset.unwrap_or_default()) / fps.1) as usize
-    }
-}
-
-impl From<Timestamp> for u32 {
-    fn from(value: Timestamp) -> Self {
-        value.0
-    }
-}
-
-impl From<u32> for Timestamp {
-    fn from(value: u32) -> Self {
-        Timestamp(value)
-    }
-}
-
-impl From<SrtTimestamp> for Timestamp {
-    fn from(value: SrtTimestamp) -> Self {
-        // For some reason it doesn't actually allow us to just get the milliseconds
-        let (hours, minutes, seconds, milliseconds) = value.get();
-        Timestamp(
-            (hours as u32) * ONE_HOUR_MILLIS
-                + (minutes as u32) * ONE_MINUTE_MILLIS
-                + (seconds as u32) * ONE_SECOND_MILLIS
-                + (milliseconds as u32),
-        )
-    }
-}
-
-impl From<Timestamp> for SrtTimestamp {
-    fn from(value: Timestamp) -> Self {
-        SrtTimestamp::from_milliseconds(*value)
-    }
-}
-
-impl Deref for Timestamp {
-    type Target = u32;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-/// Stores the possible errors that may be encountered when dealing with a sign
-/// file
-#[derive(Debug)]
-pub enum ParseError {
-    /// This may arise when reading an srt file, and is caused by malformed
-    /// format
-    SrtError(ParsingError),
-    /// This happens when seriaising or deserialising JSON for the signature
-    /// information, caused by malformed JSON
-    JsonError(serde_json::Error),
-}
-
-impl From<ParsingError> for ParseError {
-    fn from(value: ParsingError) -> Self {
-        ParseError::SrtError(value)
-    }
-}
-
-impl From<serde_json::Error> for ParseError {
-    fn from(value: serde_json::Error) -> Self {
-        ParseError::JsonError(value)
-    }
-}
+use super::{ParseError, Timestamp};
 
 type SignedInterval = Interval<u32, Vec<SignatureInfo>>;
 
@@ -224,11 +119,17 @@ impl SignFile {
         SignFile(Lapper::new(vec![]))
     }
 
+    /// Reads the buffer as the contents of a file trying to convert it into
+    /// [SignedChunk] which it then stores in a manner which can be quickly
+    /// accessible
     pub fn from_buf(buf: String) -> Result<Self, ParseError> {
         let subs = Subtitles::parse_from_str(buf)?;
         Self::from_subtitles(subs)
     }
 
+    /// Reads the given file as the given path and trys to convert the contents
+    /// into [SignedChunk] which it then stores in a manner which can be
+    /// quickly accessible
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ParseError> {
         let subs = Subtitles::parse_from_file(path, None)?;
         Self::from_subtitles(subs)
@@ -255,6 +156,28 @@ impl SignFile {
     ///
     pub fn push(&mut self, chunk: SignedChunk) {
         self.0.insert(chunk.into())
+    }
+
+    /// Inserts all the chunks of the given iterator into the sign file
+    ///
+    /// Note: Does not compress overlapping fields
+    ///
+    /// ```
+    /// let mut sf = SignFile::new();
+    ///
+    /// sf.push(vec![
+    ///   SignedChunk::new(0.into(), 1000.into(), vec![signature]),
+    ///   SignedChunk::new(1000.into(), 2000.into(), vec![signature]),
+    ///   // ...
+    /// ]);
+    ///
+    /// sf.write("./mysignatures.srt");
+    /// ```
+    ///
+    pub fn extend<T: IntoIterator<Item = SignedChunk>>(&mut self, iter: T) {
+        for c in iter {
+            self.push(c)
+        }
     }
 
     /// Find all the signatures which are applied to the given timestamp and
@@ -301,6 +224,14 @@ impl SignFile {
         Subtitles::new_from_vec(subtitles).write_to_file(path, None)?;
 
         Ok(())
+    }
+}
+
+impl FromIterator<SignedChunk> for SignFile {
+    fn from_iter<T: IntoIterator<Item = SignedChunk>>(iter: T) -> Self {
+        SignFile(Lapper::new(
+            iter.into_iter().map(|c| c.into()).collect::<Vec<_>>(),
+        ))
     }
 }
 
