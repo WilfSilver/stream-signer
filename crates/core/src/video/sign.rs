@@ -1,12 +1,12 @@
 pub use pqc_dilithium::Keypair;
 
+use crate::file::Timestamp;
 use crate::spec::{Coord, CredentialOpt, SignatureInfo};
-use crate::Timestamp;
 
 /// Stores the information necessary to sign a given second of a video, here
 /// note that the end time is implied at when you give this information to the
 /// signing algorithm
-pub struct SignInfo {
+pub struct SignInfo<'a> {
     /// The position of the embedding, if not given, we will assume the top
     /// right
     ///
@@ -16,7 +16,7 @@ pub struct SignInfo {
     /// credential definitions and references here
     pub credential: CredentialOpt,
     /// The keypair to sign with
-    pub keypair: Keypair,
+    pub keypair: &'a Keypair,
     /// The size of the embedding, if not given, we will assume the size of
     /// the window.
     ///
@@ -25,12 +25,16 @@ pub struct SignInfo {
     pub start: Timestamp,
 }
 
-impl SignInfo {
+impl<'a> SignInfo<'a> {
     /// Creates a new object, with pos and size set to None (assuming they
     /// will be defined later with [SignInfo::with_embedding])
-    pub fn new(start: Timestamp, credential: CredentialOpt, keypair: Keypair) -> Self {
+    pub fn new<C: Into<CredentialOpt>>(
+        start: Timestamp,
+        credential: C,
+        keypair: &'a Keypair,
+    ) -> Self {
         Self {
-            credential,
+            credential: credential.into(),
             keypair,
             pos: None,
             size: None,

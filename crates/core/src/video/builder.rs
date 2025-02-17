@@ -1,41 +1,21 @@
 // Parts of this file is inspired by https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter
 
-#[cfg(feature = "signing")]
-pub use super::sign::SignInfo;
-#[cfg(feature = "verifying")]
-use pqc_dilithium::verify;
-
 use glib::object::{Cast, ObjectExt};
-use gstreamer::prelude::GstBinExt;
-use image::GenericImageView;
-use std::collections::{HashMap, VecDeque};
+use gstreamer::{prelude::GstBinExt, Pipeline};
 
-use super::frame_iter::{ImageFns, RgbFrame, VideoFrame, VideoFrameIter};
-use crate::{spec::Coord, SignFile, SignedChunk, Timestamp};
-
-pub enum VideoError {
-    Glib(glib::Error),
-    OutOfRange((Timestamp, Timestamp)),
-}
-
-impl From<glib::Error> for VideoError {
-    fn from(value: glib::Error) -> Self {
-        VideoError::Glib(value)
-    }
-}
+use super::{Framerate, SignPipeline, VideoError};
+use crate::SignFile;
 
 /// Enables building, signing and verifying videos outputing to a given [SignFile]
-///
-/// For signing, you can use [SignedVideoBuilder::sign]
 #[derive(Debug)]
-pub struct SignedVideoBuilder {
+pub struct SignPipelineBuilder {
     uri: String,
-    fps: Option<(u64, u64)>,
+    fps: Option<Framerate<usize>>,
     start_offset: Option<f64>,
     sign_file: Option<SignFile>,
 }
 
-impl SignedVideoBuilder {
+impl SignPipelineBuilder {
     pub fn from_uri<S: AsRef<str>>(uri: S) -> Self {
         Self {
             uri: uri.as_ref().to_string(),
@@ -59,7 +39,7 @@ impl SignedVideoBuilder {
     /// Change the frame rate of the iterator. The argument is a fraction, for example:
     /// * For a framerate of one per 3 seconds, use (1, 3).
     /// * For a framerate of 12.34 frames per second use (1234 / 100).
-    pub fn frame_rate(mut self, fps: (u64, u64)) -> Self {
+    pub fn frame_rate(mut self, fps: Framerate<usize>) -> Self {
         self.fps = Some(fps);
         self
     }
@@ -70,109 +50,20 @@ impl SignedVideoBuilder {
         self
     }
 
-    /// Returns the fps which has been set or the default
-    ///
-    // TODO: Change this to get from the current pipeline
-    pub fn fps_or_default(&self) -> (u64, u64) {
-        self.fps.unwrap_or((60, 1))
+    /// Puts all the arguments into the [SignPipeline] object to then be used
+    /// later
+    pub fn build(self) -> Result<SignPipeline, VideoError> {
+        Ok(SignPipeline::new(
+            self.build_raw_pipeline()?,
+            self.start_offset,
+            self.fps,
+        ))
     }
 
-    /// Signs the current built video writing to the sign_file by calling
-    /// the provided `sign_with` function for every frame with its timeframe
-    /// and rgb frame.
-    ///
-    /// If the function returns some [SignInfo], it will use the information to
-    /// sign the chunk form the `start` property to the current timestamp.
-    ///
-    /// For example if you wanted to sign a video in 100ms second intervals you
-    /// could do the following
-    ///
-    /// ```
-    /// use sign_streamer::{SignedVideoBuilder, SignInfo};
-    ///
-    /// let mut builder = SignedVideoBuilder::from_uri("https://example.com/video_feed");
-    ///
-    /// builder.sign(|time, _frame| {
-    ///   ...
-    ///   if *time % 100 == 0 && *time != 0 {
-    ///     vec![
-    ///       SignInfo::new((*time - 100).into(), my_credential.into(), my_keypair),
-    ///     ]
-    ///   } else {
-    ///     vec![]
-    ///   }
-    /// })
-    /// ```
-    #[cfg(feature = "signing")]
-    pub fn sign<F>(&mut self, sign_with: F) -> Result<(), VideoError>
-    where
-        F: Fn(Timestamp, &RgbFrame) -> Vec<SignInfo>,
-    {
-        let fps = self.fps_or_default();
-        let buf_capacity = (10 * fps.0 / fps.1) as usize; // TODO: Make constant
-        let mut frame_buffer: VecDeque<RgbFrame> = VecDeque::with_capacity(buf_capacity);
-
-        for (i, frame) in self.spawn_rgb()?.enumerate() {
-            let frame = frame?;
-            if frame_buffer.len() == buf_capacity {
-                frame_buffer.pop_front();
-            }
-            let size = Coord::new(frame.width(), frame.height());
-
-            let (timestamp, excess_frames) = Timestamp::from_frames(i, fps, self.start_offset);
-            let sign_info = sign_with(timestamp, &frame);
-
-            frame_buffer.push_back(frame);
-            let mut chunks: HashMap<Timestamp, SignedChunk> = HashMap::default();
-            for si in sign_info {
-                // TODO: Add protections if the timeframe is too short
-                let start = si.start;
-
-                // TODO: Create custom error type
-                let i = frame_buffer
-                    .len()
-                    .checked_sub(i - excess_frames - start.into_frames(fps, self.start_offset))
-                    .ok_or(VideoError::OutOfRange((start, timestamp)))?;
-
-                // TODO: Potentially optimise by grouping sign info with same
-                // bounds
-                let mut frames_buf: Vec<u8> = Vec::with_capacity(
-                    size.x as usize * size.y as usize * (frame_buffer.len() - i),
-                );
-                for f in frame_buffer.range(i..frame_buffer.len()) {
-                    // TODO: Deal with the sign crop and stuff
-                    frames_buf.extend_from_slice(
-                        f.as_flat().as_slice(), //.ok_or(VideoError::OutOfRange((start, timestamp)))?,
-                    );
-                }
-
-                let signature = si.sign(&frames_buf, size);
-                match chunks.get_mut(&start) {
-                    Some(c) => c.val.push(signature),
-                    None => {
-                        chunks.insert(start, SignedChunk::new(start, timestamp, vec![signature]));
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Consumes the builder and creates an iterator returning video frames.
-    /// Frames are Rgb, with 8 bits per colour.
-    fn spawn_rgb(&self) -> Result<VideoFrameIter<RgbFrame>, glib::Error> {
-        self.create_pipeline::<RgbFrame>()
-    }
-
-    fn create_pipeline<RF: VideoFrame>(&self) -> Result<VideoFrameIter<RF>, glib::Error> {
+    fn build_raw_pipeline(&self) -> Result<Pipeline, glib::Error> {
         let fps_arg = match self.fps {
             None => String::from(""),
-            Some((numer, denom)) => {
-                format!(
-                    "videorate name=rate ! capsfilter name=ratefilter ! video/x-raw,framerate={numer}/{denom} ! "
-                )
-            }
+            Some(fps) => fps.get_args(),
         };
 
         // Create our pipeline from a pipeline description string.
@@ -199,27 +90,6 @@ impl SignedVideoBuilder {
         appsink.set_max_buffers(1);
         appsink.set_drop(false);
 
-        // Tell the appsink what format we want.
-        // This can be set after linking the two objects, because format negotiation between
-        // both elements will happen during pre-rolling of the pipeline.
-        appsink.set_caps(Some(
-            &gstreamer::Caps::builder("video/x-raw")
-                .field("format", RF::gst_video_format().to_str())
-                .build(),
-        ));
-
-        let pipeline = VideoFrameIter::<RF> {
-            pipeline,
-            fused: false,
-            _phantom: std::marker::PhantomData,
-        };
-        pipeline.pause()?;
-
-        if let Some(skip_amount) = self.start_offset {
-            pipeline.seek_accurate(skip_amount)?;
-        }
-
-        pipeline.play()?;
         Ok(pipeline)
     }
 }
