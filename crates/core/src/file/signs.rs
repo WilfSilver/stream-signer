@@ -77,6 +77,7 @@ impl PartialEq for SignedChunk {
 
 /// This gives a single signature with the range which that signature is
 /// applied to to make it easy to iterate over
+#[derive(Debug)]
 pub struct SignatureWithRange<'a> {
     pub range: Range<Timestamp>,
     pub signature: &'a SignatureInfo,
@@ -94,21 +95,21 @@ impl<'a> SignatureWithRange<'a> {
 /// Creating a signature file
 ///
 /// ```
-/// let mut sf = SignFile::new();
+/// # let mut sf = SignFile::new();
 ///
-/// sf.push(chunk);
+/// # sf.push(chunk);
 ///
-/// sf.write("./mysignatures.srt");
+/// # sf.write("./mysignatures.srt");
 /// ```
 ///
 /// Or reading signatures for a given time frame
 ///
 /// ```
-/// let sf = SignFile::from_file("./mysignatures.srt")
+/// # let sf = SignFile::from_file("./mysignatures.srt")
 ///
-/// for s in sf.get_signatures_at(2000) { // Get at 2 seconds mark
-///   // ...
-/// }
+/// # for s in sf.get_signatures_at(2000) { // Get at 2 seconds mark
+/// #   // ...
+/// # }
 /// ```
 ///
 #[derive(Debug)]
@@ -147,11 +148,11 @@ impl SignFile {
     /// Inserts a new signed chunk into the signatures list
     ///
     /// ```
-    /// let mut sf = SignFile::new();
+    /// # let mut sf = SignFile::new();
     ///
-    /// sf.push(SignedChunk::new(0.into(), 1000.into(), vec![signature]));
+    /// # sf.push(SignedChunk::new(0.into(), 1000.into(), vec![signature]));
     ///
-    /// sf.write("./mysignatures.srt");
+    /// # sf.write("./mysignatures.srt");
     /// ```
     ///
     pub fn push(&mut self, chunk: SignedChunk) {
@@ -163,15 +164,15 @@ impl SignFile {
     /// Note: Does not compress overlapping fields
     ///
     /// ```
-    /// let mut sf = SignFile::new();
+    /// # let mut sf = SignFile::new();
     ///
-    /// sf.push(vec![
-    ///   SignedChunk::new(0.into(), 1000.into(), vec![signature]),
-    ///   SignedChunk::new(1000.into(), 2000.into(), vec![signature]),
-    ///   // ...
-    /// ]);
+    /// # sf.push(vec![
+    /// #   SignedChunk::new(0.into(), 1000.into(), vec![signature]),
+    /// #   SignedChunk::new(1000.into(), 2000.into(), vec![signature]),
+    /// #   // ...
+    /// # ]);
     ///
-    /// sf.write("./mysignatures.srt");
+    /// # sf.write("./mysignatures.srt");
     /// ```
     ///
     pub fn extend<T: IntoIterator<Item = SignedChunk>>(&mut self, iter: T) {
@@ -184,11 +185,11 @@ impl SignFile {
     /// the full ranges in which they apply for.
     ///
     /// ```
-    /// let sf = SignFile::from_file("./mysignatures.srt")
+    /// # let sf = SignFile::from_file("./mysignatures.srt")
     ///
-    /// for s in sf.get_signatures_at(2000) { // Get at 2 seconds mark
-    ///   // ...
-    /// }
+    /// # for s in sf.get_signatures_at(2000) { // Get at 2 seconds mark
+    /// #   // ...
+    /// # }
     /// ```
     ///
     pub fn get_signatures_at(&self, at: Timestamp) -> impl Iterator<Item = SignatureWithRange<'_>> {

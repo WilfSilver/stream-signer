@@ -1,10 +1,9 @@
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::{coord::Coord, credential::CredentialOpt};
+use super::{coord::Coord, PresentationOrId};
 
-const SIGNATURE_LEN: usize = 4595;
-type Signature = [u8; SIGNATURE_LEN];
+type Signature = Vec<u8>;
 
 /// Information stored about the signature of a video/embedding for a given
 /// time range in a the video
@@ -17,13 +16,13 @@ pub struct SignatureInfo {
     pub size: Coord,
     /// Reference to or the definition of a verified credential (id field is
     /// required).
-    pub credential: CredentialOpt,
+    pub presentation: PresentationOrId,
     /// The signature information in base64
     #[serde(
         serialize_with = "signature_serialise",
         deserialize_with = "from_signature"
     )]
-    pub signature: Signature, // TODO: Swap to bin
+    pub signature: Signature,
 }
 
 fn signature_serialise<S>(x: &Signature, s: S) -> Result<S::Ok, S::Error>
