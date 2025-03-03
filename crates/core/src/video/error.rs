@@ -1,12 +1,16 @@
-use crate::file::Timestamp;
+use identity_iota::storage::JwkStorageDocumentError;
+use thiserror::Error;
 
+use crate::{file::Timestamp, UnknownKey};
+
+#[derive(Error, Debug)]
 pub enum VideoError {
-    Glib(glib::Error),
-    OutOfRange((Timestamp, Timestamp)),
-}
-
-impl From<glib::Error> for VideoError {
-    fn from(value: glib::Error) -> Self {
-        VideoError::Glib(value)
-    }
+    #[error(transparent)]
+    Glib(#[from] glib::Error),
+    #[error("Tried to access range which is not covered by the video: {0} -> {1}")]
+    OutOfRange(Timestamp, Timestamp),
+    #[error(transparent)]
+    Sign(#[from] JwkStorageDocumentError),
+    #[error(transparent)]
+    UnknownCredential(#[from] UnknownKey),
 }

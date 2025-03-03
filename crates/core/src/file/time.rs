@@ -1,4 +1,7 @@
-use std::ops::{Add, Deref, Rem, Sub};
+use std::{
+    fmt::Display,
+    ops::{Add, Deref, Rem, Sub},
+};
 
 use num_traits::{NumCast, PrimInt};
 use srtlib::Timestamp as SrtTimestamp;
@@ -16,6 +19,12 @@ pub const ONE_HOUR_MILLIS: u32 = 60 * ONE_MINUTE_MILLIS;
 /// and `srtlib::Timestamp`
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timestamp(u32);
+
+impl Display for Timestamp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 impl Timestamp {
     pub const fn new(milliseconds: u32) -> Self {

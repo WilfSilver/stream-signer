@@ -1,7 +1,7 @@
 mod coord;
-mod credential;
+mod presentation;
 mod signature;
 
 pub use coord::*;
-pub use credential::*;
+pub use presentation::*;
 pub use signature::*;
