@@ -13,10 +13,10 @@ use crate::{Signer, SignerState, UnknownKey};
 
 use super::frame_iter::RgbFrame;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct UnverifiedSignature {
-    error: SingleStructError<SignatureVerificationErrorKind>,
-    signer: Signer,
+    pub error: Arc<SingleStructError<SignatureVerificationErrorKind>>,
+    pub signer: Signer,
 }
 
 #[derive(Debug, Error, Clone)]
@@ -27,7 +27,7 @@ pub enum InvalidSignatureError {
     UnknownRef(#[from] UnknownKey),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SignatureState {
     Invalid(InvalidSignatureError),
     Unverified(UnverifiedSignature),
@@ -54,7 +54,6 @@ impl SignatureState {
                     }),
                 }
             }
-            // TODO: Improve names
             SignerState::Invalid(e) => Self::Invalid(InvalidSignatureError::Jwt(e.clone())),
             SignerState::ResolverFailed(e) => Self::Unresolved(e.clone()),
         }
