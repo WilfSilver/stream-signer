@@ -188,6 +188,9 @@ impl SignPipeline {
         let iter = self.try_iter::<RgbFrame>()?.enumerate();
         let delayed = DelayedStream::<BUF_CAPACITY, _, _>::new(stream::iter(iter));
 
+        let state_cache: Arc<Mutex<HashMap<(Timestamp, &Vec<u8>), SignatureState>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+
         // TODO: THERE ARE WAYYY TOO MANY CLONES AHHHH
         let credentials = Arc::new(Mutex::new(CredentialStore::default()));
         let res = delayed
@@ -199,6 +202,7 @@ impl SignPipeline {
             })
             .then(move |(i, frame, buffer)| {
                 let credentials = credentials.clone();
+                let state_cache = state_cache.clone();
                 async move {
                     let frame = match &frame.1 {
                         Ok(f) => f.clone(), // TODO: Probs try and improve this
@@ -207,7 +211,6 @@ impl SignPipeline {
 
                     let size = Coord::new(frame.width(), frame.height());
 
-                    // TODO: More Caching
                     let (timestamp, excess_frames) =
                         Timestamp::from_frames(i, fps, self.start_offset);
 
@@ -216,44 +219,77 @@ impl SignPipeline {
                     let sigs_iter = stream::iter(signfile.get_signatures_at(timestamp).into_iter())
                         .map(|sig| {
                             let credentials = credentials.clone();
+                            let state_cache = state_cache.clone();
                             async move {
                                 let start = sig.range.start;
+                                let end = sig.range.end;
                                 let sig = sig.signature;
+                                let cache_key = (start, &sig.signature);
 
-                                let i = self.get_start_frame(
-                                    buf_ref.len(),
-                                    fps,
-                                    excess_frames,
-                                    start,
-                                    timestamp,
-                                    i,
-                                )?;
+                                let mut state_cache = state_cache.lock().await;
 
-                                let frames_buf = Self::frames_to_buffer(
-                                    buf_ref.len(),
-                                    i,
-                                    size,
-                                    buf_ref.iter().map(|a| {
-                                        // TODO: Check this
-                                        // It is safe to unwrap here due to the previous
-                                        // checks on the frames
-                                        let res = a.1.as_ref().unwrap();
-                                        res
-                                    }),
-                                );
+                                // Due to us having to pass to the output of the iterator
+                                let state = match state_cache.get(&cache_key) {
+                                    Some(s) => s.clone(),
+                                    None => {
+                                        // If there is nothing in the cache we
+                                        // will assume this is the first frame
+                                        // for which it is signed for
+                                        let start_frame = self.get_start_frame(
+                                            buf_ref.len(),
+                                            fps,
+                                            excess_frames,
+                                            start,
+                                            timestamp,
+                                            i,
+                                        )?;
 
-                                let mut credentials = credentials.lock().await;
+                                        let end_frame = self.get_start_frame(
+                                            buf_ref.len(),
+                                            fps,
+                                            excess_frames,
+                                            end,
+                                            timestamp,
+                                            i,
+                                        )?;
 
-                                let signer = credentials.normalise(sig.presentation.clone()).await;
+                                        let frames_buf = Self::frames_to_buffer(
+                                            buf_ref.len(),
+                                            start_frame,
+                                            size,
+                                            // TODO: This potentially also needs to include the
+                                            // current frame
+                                            buf_ref[0..end_frame].iter().map(|a| {
+                                                // TODO: Check this
+                                                // It is safe to unwrap here due to the previous
+                                                // checks on the frames
+                                                let res = a.1.as_ref().unwrap();
+                                                res
+                                            }),
+                                        );
 
-                                Ok(SignatureState::from_signer(
-                                    signer,
-                                    VerificationInput {
-                                        alg: JwsAlgorithm::EdDSA,
-                                        signing_input: frames_buf.into_boxed_slice(),
-                                        decoded_signature: sig.signature.clone().into_boxed_slice(),
-                                    },
-                                ))
+                                        let mut credentials = credentials.lock().await;
+
+                                        let signer =
+                                            credentials.normalise(sig.presentation.clone()).await;
+
+                                        let state = SignatureState::from_signer(
+                                            signer,
+                                            VerificationInput {
+                                                alg: JwsAlgorithm::EdDSA,
+                                                signing_input: frames_buf.into_boxed_slice(),
+                                                decoded_signature: sig
+                                                    .signature
+                                                    .clone()
+                                                    .into_boxed_slice(),
+                                            },
+                                        );
+                                        state_cache.insert(cache_key, state.clone());
+                                        state
+                                    }
+                                };
+
+                                Ok(state)
                             }
                         });
 
@@ -292,6 +328,7 @@ impl SignPipeline {
     ///
     /// ```
     /// use sign_streamer::{SignPipeline};
+    /// use stream_signer::SignFile
     ///
     /// let pipeline = SignPipeline::builder("https://example.com/video_feed").build()?;
     /// let credential: Credential = ...;
@@ -299,8 +336,7 @@ impl SignPipeline {
     ///
     /// let sign_file = pipeline.sign_chunks(100, credential, keypair).collect::<SignFile>();
     ///
-    /// sign_file.write("./my_signatures.srt")
-    ///
+    /// sign_file.write("./my_signatures.srt");
     /// ```
     pub async fn sign_chunks<'a, T: Into<Timestamp>, K, I>(
         &self,
