@@ -1,6 +1,6 @@
 use identity_iota::{
     credential::{Jwt, JwtPresentationOptions, Presentation},
-    iota::IotaDocument,
+    document::CoreDocument,
     storage::{
         JwkDocumentExt, JwkStorage, JwkStorageDocumentError, JwsSignatureOptions, KeyIdStorage,
         MethodDigest, Storage,
@@ -11,22 +11,21 @@ use identity_iota::{
 use crate::spec::{Coord, PresentationOrId, PresentationReference, SignatureInfo};
 use crate::{file::Timestamp, spec::PresentationDefinition};
 
-pub trait KeyBound: JwkStorage + Clone {}
-impl<T: JwkStorage + Clone> KeyBound for T {}
+pub trait KeyBound: JwkStorage {}
+impl<T: JwkStorage> KeyBound for T {}
 
-pub trait KeyIdBound: KeyIdStorage + Clone {}
-impl<T: KeyIdStorage + Clone> KeyIdBound for T {}
+pub trait KeyIdBound: KeyIdStorage {}
+impl<T: KeyIdStorage> KeyIdBound for T {}
 
-#[derive(Clone)]
 pub struct SignerInfo<'a, K, I>
 where
     K: KeyBound,
     I: KeyIdBound,
 {
-    document: &'a IotaDocument,
-    presentation: &'a Presentation<Jwt>,
-    storage: &'a Storage<K, I>,
-    fragment: &'a str,
+    pub document: &'a CoreDocument,
+    pub presentation: Presentation<Jwt>,
+    pub storage: &'a Storage<K, I>,
+    pub fragment: &'a str,
 }
 
 impl<'a, K, I> SignerInfo<'a, K, I>
@@ -38,7 +37,7 @@ where
         let jwt = self
             .document
             .create_presentation_jwt(
-                self.presentation,
+                &self.presentation,
                 self.storage,
                 self.fragment,
                 &JwsSignatureOptions::default(),
@@ -57,7 +56,7 @@ where
     }
 
     fn gen_id(&self) -> String {
-        unimplemented!()
+        "test".to_string()
     }
 
     async fn sign(&self, msg: &[u8]) -> Result<Vec<u8>, JwkStorageDocumentError> {
@@ -101,7 +100,7 @@ where
 
     /// The given information to prove your credability as well as the
     /// information to create any signatures
-    pub signer: SignerInfo<'a, K, I>,
+    pub signer: &'a SignerInfo<'a, K, I>,
 
     /// The size of the embedding, if not given, we will assume the size of
     /// the window.
@@ -121,7 +120,7 @@ where
 {
     /// Creates a new object, with pos and size set to None (assuming they
     /// will be defined later with [SignInfo::with_embedding])
-    pub fn new(start: Timestamp, signer: SignerInfo<'a, K, I>, is_ref: bool) -> Self {
+    pub fn new(start: Timestamp, signer: &'a SignerInfo<'a, K, I>, is_ref: bool) -> Self {
         Self {
             signer,
             pos: None,

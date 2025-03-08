@@ -209,11 +209,11 @@ impl SignFile {
     /// Writes the current store to a specified srt file
     ///
     /// ```
-    /// let mut sf = SignFile::new();
+    /// # let mut sf = SignFile::new();
     ///
-    /// sf.push(SignedChunk::new(0.into(), 1000.into(), vec![signature]));
+    /// # sf.push(SignedChunk::new(0.into(), 1000.into(), vec![signature]));
     ///
-    /// sf.write("./mysignatures.srt");
+    /// # sf.write("./mysignatures.srt");
     /// ```
     ///
     pub fn write<P: AsRef<Path>>(&self, path: P) -> Result<(), ParseError> {

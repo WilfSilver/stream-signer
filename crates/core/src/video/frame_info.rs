@@ -21,11 +21,11 @@ use super::{frame_iter::RgbFrame, Framerate};
 /// millisecond which is a multiple of `x` then you can simply do:
 ///
 /// ```
-/// let tr: TimeRange = ...;
+/// # let tr: TimeRange = ...;
 ///
-/// if tr % 100 == 0 {
-///   // Do something
-/// }
+/// # if tr % 100 == 0 {
+/// #   // Do something
+/// # }
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct TimeRange {
