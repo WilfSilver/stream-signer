@@ -121,7 +121,7 @@ impl CredentialStore {
     /// #   .finish()
     /// #   .await?;
     ///
-    /// # let mut resolver: Resolver<IotaDocument> = Resolver::new();
+    /// # let mut resolver = Resolver::new();
     /// # resolver.attach_iota_handler(client);
     ///
     /// # let store = CredentialStore::new(resolver);

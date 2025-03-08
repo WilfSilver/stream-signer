@@ -1,37 +1,33 @@
-use std::{array, collections::VecDeque, sync::Arc, task::Poll};
+use std::{collections::VecDeque, sync::Arc, task::Poll};
 
 use futures::Stream;
 use pin_project::pin_project;
 
 #[derive(Debug, PartialEq)]
-pub enum Ahead<const LEN: usize, T> {
+pub enum Delayed<T> {
     Partial(Box<[Arc<T>]>),
-    Full([Arc<T>; LEN]),
+    Full(Arc<T>, Box<[Arc<T>]>),
 }
 
-#[derive(Debug, PartialEq)]
-pub enum Delayed<const LEN: usize, T> {
-    Partial(Box<[Arc<T>]>),
-    Full(Arc<T>, [Arc<T>; LEN]),
-}
-
-pub struct DelayBuffer<const LEN: usize, T> {
+pub struct DelayBuffer<T> {
     buf: VecDeque<Arc<T>>,
+    len: usize,
 }
 
-impl<const LEN: usize, T> DelayBuffer<LEN, T> {
-    pub fn new() -> Self {
+impl<T> DelayBuffer<T> {
+    pub fn new(len: usize) -> Self {
         Self {
             buf: {
                 let mut buf = VecDeque::new();
-                buf.reserve_exact(LEN);
+                buf.reserve_exact(len);
                 buf
             },
+            len,
         }
     }
 
     pub fn is_filled(&self) -> bool {
-        self.buf.len() == LEN
+        self.buf.len() == self.len
     }
 
     pub fn enqueue(&mut self, item: T) -> Option<Arc<T>> {
@@ -46,30 +42,24 @@ impl<const LEN: usize, T> DelayBuffer<LEN, T> {
         old
     }
 
-    pub fn get(&self) -> Ahead<LEN, T> {
-        if self.is_filled() {
-            Ahead::Full(array::from_fn::<_, LEN, _>(|i| {
-                self.buf.get(i).cloned().unwrap()
-            }))
-        } else {
-            Ahead::Partial({
-                let mut v = Vec::new();
-                v.reserve_exact(self.buf.len());
+    pub fn dequeue(&mut self) -> Option<Arc<T>> {
+        self.buf.pop_front()
+    }
 
-                self.buf.iter().cloned().for_each(|it| v.push(it));
-                v.into_boxed_slice()
-            })
-        }
+    /// This returns the current items as a boxed slice.
+    ///
+    /// NOTE: This does not check if the buffer is full yet
+    pub fn get_future_items(&self) -> Box<[Arc<T>]> {
+        let mut v = Vec::new();
+        v.reserve_exact(self.buf.len());
+
+        self.buf.iter().cloned().for_each(|it| v.push(it));
+
+        v.into_boxed_slice()
     }
 }
 
-impl<const LEN: usize, T> Default for DelayBuffer<LEN, T> {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<const LEN: usize, T> Clone for DelayBuffer<LEN, T>
+impl<T> Clone for DelayBuffer<T>
 where
     T: Clone,
 {
@@ -77,43 +67,44 @@ where
         Self {
             buf: {
                 let mut v = VecDeque::new();
-                v.reserve_exact(LEN);
+                v.reserve_exact(self.len);
                 v
             },
+            len: self.len,
         }
     }
 }
 
-impl<const LEN: usize, T> Unpin for DelayBuffer<LEN, T> {}
+impl<T> Unpin for DelayBuffer<T> {}
 
 #[pin_project]
-pub struct DelayedStream<const LEN: usize, T, Src>
+pub struct DelayedStream<T, Src>
 where
     Src: Stream<Item = T>,
 {
     #[pin]
     source: Src,
-    buffer: DelayBuffer<LEN, T>,
+    buffer: DelayBuffer<T>,
 }
 
-impl<const LEN: usize, T, Src> DelayedStream<LEN, T, Src>
+impl<T, Src> DelayedStream<T, Src>
 where
     Src: Stream<Item = T>,
 {
-    pub fn new(source: Src) -> Self {
+    pub fn new(len: usize, source: Src) -> Self {
         Self {
             source,
-            buffer: DelayBuffer::new(),
+            buffer: DelayBuffer::new(len),
         }
     }
 }
 
-impl<const LEN: usize, T, Src> Stream for DelayedStream<LEN, T, Src>
+impl<T, Src> Stream for DelayedStream<T, Src>
 where
     Src: Stream<Item = T>,
     T: Unpin,
 {
-    type Item = Delayed<LEN, T>;
+    type Item = Delayed<T>;
 
     fn poll_next(
         self: std::pin::Pin<&mut Self>,
@@ -125,21 +116,23 @@ where
         match source.poll_next(cx) {
             Poll::Ready(Some(it)) => {
                 let Some(latest) = p_self.buffer.enqueue(it) else {
-                    let items = match p_self.buffer.get() {
-                        Ahead::Partial(items) => items,
-                        Ahead::Full(items) => Box::new(items) as Box<[Arc<_>]>,
-                    };
+                    let items = p_self.buffer.get_future_items();
 
                     return Poll::Ready(Some(Delayed::Partial(items)));
                 };
 
-                let future = match p_self.buffer.get() {
-                    Ahead::Partial(_) => unreachable!(),
-                    Ahead::Full(future) => future,
-                };
+                // NOTE: We don't have to worry about this not being full
+                // as it is unreachable at this point
+                let future = p_self.buffer.get_future_items();
                 Poll::Ready(Some(Delayed::Full(latest, future)))
             }
-            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Ready(None) => {
+                let latest = p_self
+                    .buffer
+                    .dequeue()
+                    .map(|latest| Delayed::Full(latest, p_self.buffer.get_future_items()));
+                Poll::Ready(latest)
+            }
             Poll::Pending => Poll::Pending,
         }
     }
@@ -169,7 +162,7 @@ mod tests {
 
         const LEN: usize = 10;
 
-        let delayed = DelayedStream::<LEN, _, _>::new(stream);
+        let delayed = DelayedStream::<_, _>::new(LEN, stream);
 
         let filtered = delayed.filter_map(|a| async move {
             match a {
