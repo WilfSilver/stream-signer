@@ -189,8 +189,6 @@ impl SignPipeline {
         // TODO: Change to FrameError (separating VideoError + FrameError)
     ) -> Result<impl Stream<Item = Result<Pin<Box<VerifiedFrame>>, VideoError>> + use<'a>, VideoError>
     {
-        const BUF_CAPACITY: usize = MAX_CHUNK_LENGTH * 10;
-
         let fps = self.fps.unwrap_or_default();
 
         let iter = self.try_iter::<RgbFrame>()?.enumerate();
@@ -220,8 +218,7 @@ impl SignPipeline {
 
                     let size = Coord::new(frame.width(), frame.height());
 
-                    let (timestamp, excess_frames) =
-                        Timestamp::from_frames(i, fps, self.start_offset);
+                    let (timestamp, _) = Timestamp::from_frames(i, fps, self.start_offset);
 
                     let buf_ref = &buffer;
 
@@ -492,15 +489,11 @@ mod tests {
 
     #[tokio::test]
     async fn sign_and_verify() -> Result<(), Box<dyn Error>> {
-        println!("Hi there");
         gstreamer::init()?;
-        println!("Initiated");
 
         let client = get_client();
         let issuer = TestIssuer::new(client.clone()).await?;
         let resolver = get_resolver(client);
-
-        println!("Resolver trained");
 
         let identity = TestIdentity::new(&issuer, |id| {
             Subject::from_json_value(json!({
@@ -516,20 +509,14 @@ mod tests {
         })
         .await?;
 
-        println!("Identity trained");
-
         let filepath = test_video(videos::BIG_BUNNY);
 
         let pipe = SignPipeline::builder(filepath.clone()).build()?;
-
-        println!("Pipeline built");
 
         let signfile = pipe
             .sign_chunks(100, &identity.gen_signer_info()?)
             .await?
             .collect::<SignFile>();
-
-        println!("Signing completed");
 
         let pipe = SignPipeline::builder(filepath).build()?;
 
@@ -566,8 +553,6 @@ mod tests {
                 future::ready(())
             })
             .await;
-
-        println!("Verifying completed");
 
         Ok(())
     }

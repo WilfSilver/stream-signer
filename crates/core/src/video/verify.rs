@@ -42,8 +42,6 @@ impl SignatureState {
             Err(e) => return Self::Invalid(InvalidSignatureError::UnknownRef(e)),
         };
 
-        println!("Verification buffer: {}", input.signing_input.len());
-
         let verifier = EdDSAJwsVerifier::default();
         match signer {
             SignerState::Valid(s) => {
