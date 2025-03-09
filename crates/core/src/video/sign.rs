@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use identity_iota::{
     credential::{Jwt, JwtPresentationOptions, Presentation},
     document::CoreDocument,

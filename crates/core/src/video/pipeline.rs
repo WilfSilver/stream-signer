@@ -255,10 +255,9 @@ impl SignPipeline {
                                             buf_ref.len(),
                                             start_frame,
                                             size,
-                                            // TODO: This potentially also needs to include the
-                                            // current frame
+                                            // TODO: Investigate why its end_frame - 1
                                             vec![frame_ref].into_iter().chain(
-                                                buf_ref[0..end_frame].iter().map(|a| {
+                                                buf_ref[0..end_frame - 1].iter().map(|a| {
                                                     // TODO: Check this
                                                     // It is safe to unwrap here due to the previous
                                                     // checks on the frames
@@ -536,7 +535,6 @@ mod tests {
 
         pipe.verify(resolver, &signfile)?
             .for_each(|v| {
-                println!("uhhh");
                 let v = match v {
                     Ok(v) => v,
                     Err(e) => {
@@ -568,8 +566,6 @@ mod tests {
                 future::ready(())
             })
             .await;
-
-        assert!(false);
 
         println!("Verifying completed");
 
