@@ -1,10 +1,10 @@
 mod app;
-mod input;
+mod menu;
 mod state;
 mod video;
 
 use druid::{AppLauncher, WindowDesc};
-use state::AppData;
+use state::{AppData, Delegate};
 
 pub fn main() {
     let window = WindowDesc::new(app::make_ui()).title("External Event Demo");
@@ -15,6 +15,7 @@ pub fn main() {
 
     launcher
         .log_to_console()
+        .delegate(Delegate)
         .launch(AppData::new(event_sink))
         .expect("launch failed");
 }
