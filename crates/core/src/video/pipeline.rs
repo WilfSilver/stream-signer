@@ -458,6 +458,7 @@ mod tests {
         client::{get_client, get_resolver},
         identity::TestIdentity,
         issuer::TestIssuer,
+        test_video, videos,
     };
     use std::error::Error;
 
@@ -489,9 +490,9 @@ mod tests {
 
         println!("Identity trained");
 
-        let pipe =
-            // SignPipeline::builder("./tests/videos/Big_Buck_Bunny_360_10s_1MB.mp4").build()?;
-            SignPipeline::builder("https://test-videos.co.uk/vids/bigbuckbunny/mp4/av1/360/Big_Buck_Bunny_360_10s_1MB.mp4").build()?;
+        let filepath = test_video(videos::BIG_BUNNY);
+
+        let pipe = SignPipeline::builder(filepath.clone()).build()?;
 
         println!("Pipeline built");
 
@@ -502,9 +503,7 @@ mod tests {
 
         println!("Signing completed");
 
-        let pipe =
-            // SignPipeline::builder("./tests/videos/Big_Buck_Bunny_360_10s_1MB.mp4").build()?;
-            SignPipeline::builder("https://test-videos.co.uk/vids/bigbuckbunny/mp4/av1/360/Big_Buck_Bunny_360_10s_1MB.mp4").build()?;
+        let pipe = SignPipeline::builder(filepath).build()?;
 
         pipe.verify(resolver, &signfile)?
             .for_each(|v| {
