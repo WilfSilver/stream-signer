@@ -1,15 +1,19 @@
+use futures::future::join_all;
 use futures::{stream, Stream, StreamExt};
 use glib::object::Cast;
 use gstreamer::prelude::GstBinExt;
 use gstreamer::Pipeline;
 use identity_iota::prelude::Resolver;
+use identity_iota::storage::JwkStorageDocumentError;
 use identity_iota::verification::jws::{JwsAlgorithm, VerificationInput};
 use image::GenericImageView;
 use std::collections::{HashMap, VecDeque};
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+use crate::spec::SignatureInfo;
 use crate::video::Delayed;
 use crate::{
     file::{SignedChunk, Timestamp},
@@ -339,8 +343,8 @@ impl SignPipeline {
         signer: &'a SignerInfo<'a, K, I>,
     ) -> Result<impl Iterator<Item = SignedChunk> + 'a, VideoError>
     where
-        K: KeyBound,
-        I: KeyIdBound,
+        K: KeyBound + Sync,
+        I: KeyIdBound + Sync,
     {
         let length = length.into();
         let mut is_start = true;
@@ -394,8 +398,8 @@ impl SignPipeline {
         mut sign_with: F,
     ) -> Result<impl Iterator<Item = SignedChunk> + 'a, VideoError>
     where
-        K: KeyBound + 'a,
-        I: KeyIdBound + 'a,
+        K: KeyBound + 'a + Sync,
+        I: KeyIdBound + 'a + Sync,
         F: FnMut(FrameInfo<'_>) -> ITER,
         ITER: IntoIterator<Item = ChunkSigner<'a, K, I>>,
     {
@@ -403,9 +407,9 @@ impl SignPipeline {
         let buf_capacity = fps.convert_to_frames(MAX_CHUNK_LENGTH);
         let mut frame_buffer: VecDeque<RgbFrame> = VecDeque::with_capacity(buf_capacity);
 
-        let mut res: Vec<SignedChunk> = vec![];
+        let mut futures: Vec<(Timestamp, _)> = vec![];
 
-        // TODO: Somehow swap to iter
+        // TODO: Somehow swap to iter/stream
         for (i, frame) in self.try_iter()?.enumerate() {
             let frame: RgbFrame = frame?;
             if frame_buffer.len() == buf_capacity {
@@ -414,10 +418,14 @@ impl SignPipeline {
             let size = Coord::new(frame.width(), frame.height());
 
             let (timestamp, excess_frames) = Timestamp::from_frames(i, fps, self.start_offset);
+
             let sign_info = sign_with(FrameInfo::new(&frame, timestamp, i, fps));
 
             frame_buffer.push_back(frame);
-            let mut chunks: HashMap<Timestamp, SignedChunk> = HashMap::default();
+            let mut chunks: HashMap<
+                Timestamp,
+                Vec<Pin<Box<dyn Future<Output = Result<SignatureInfo, JwkStorageDocumentError>>>>>,
+            > = HashMap::new();
             for si in sign_info.into_iter() {
                 // TODO: Add protections if the timeframe is too short
                 let start = si.start;
@@ -431,16 +439,37 @@ impl SignPipeline {
                     timestamp,
                 )?;
 
-                let signature = si.sign(&frames_buf, size).await?;
+                let fut = Box::pin(si.sign(frames_buf, size));
+
                 match chunks.get_mut(&start) {
-                    Some(c) => c.val.push(signature),
+                    Some(c) => c.push(fut),
                     None => {
-                        chunks.insert(start, SignedChunk::new(start, timestamp, vec![signature]));
+                        chunks.insert(start, vec![fut]);
                     }
                 }
             }
-            res.extend(chunks.into_values());
+            futures.push((timestamp, chunks));
         }
+
+        let res = join_all(futures.into_iter().map(|(end, chunks)| async move {
+            join_all(chunks.into_iter().map(|(start, futures)| async move {
+                join_all(futures).await.into_iter().try_fold(
+                    SignedChunk::new(start, end, vec![]),
+                    |mut curr, signature| match signature {
+                        Ok(sig) => {
+                            curr.val.push(sig);
+                            Ok(curr)
+                        }
+                        Err(e) => Err(e),
+                    },
+                )
+            }))
+            .await
+        }))
+        .await
+        .into_iter()
+        .flatten()
+        .collect::<Result<Vec<SignedChunk>, _>>()?;
 
         Ok(res.into_iter())
     }
