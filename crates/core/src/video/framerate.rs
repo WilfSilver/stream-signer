@@ -7,8 +7,8 @@ use num_traits::NumCast;
 
 use crate::time::ONE_SECOND_MILLIS;
 
-// Basic trait to capture all the possible types available to be used in the
-// Framerate type
+/// Basic trait to capture all the possible types available to be used in the
+/// Framerate type
 pub trait FramerateCompatible:
     Copy + NumCast + Mul<Output = Self> + Div<Output = Self> + Debug + Display
 {
@@ -25,6 +25,8 @@ impl<T> FramerateCompatible for T where
 /// It is generic to provide better options of how you want the outputs of the
 /// function, for example if you wish outputs as floats you can convert between
 /// them.
+///
+/// TODO: Come up with system for enum, Fastest, Auto, Set
 #[derive(Debug, Clone, Copy)]
 pub struct Framerate<T>(T, T)
 where

@@ -5,7 +5,7 @@ use std::iter::FusedIterator;
 use gstreamer::{prelude::*, ClockTime, CoreError, MessageView, StateChangeSuccess};
 
 use gstreamer_video::VideoFrameExt;
-use image::GenericImageView;
+pub use image::GenericImageView;
 
 /// Iterates over all the frames in a video.
 /// The iterator will prduce Ok(frame) until

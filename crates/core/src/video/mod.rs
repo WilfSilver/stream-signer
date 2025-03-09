@@ -14,6 +14,7 @@ pub use builder::*;
 pub use delayed_stream::*;
 pub use error::*;
 pub use frame_info::*;
+pub use frame_iter::{GenericImageView, ImageFns, RgbFrame};
 pub use framerate::*;
 pub use pipeline::*;
 #[cfg(feature = "signing")]
