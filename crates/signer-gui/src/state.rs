@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use druid::{Data, ExtEventSink};
+use druid::{
+    commands, AppDelegate, Command, Data, DelegateCtx, Env, ExtEventSink, Handled, Lens, Target,
+};
 
 use crate::video::{Frame, StateWithFrame};
 
@@ -20,7 +22,6 @@ impl Default for VideoOptions {
 #[derive(Clone, Data, Default)]
 pub struct VideoData {
     pub curr_frame: Option<Frame>,
-    pub options: VideoOptions,
 }
 
 #[derive(Clone, Copy, Default, Data, PartialEq)]
@@ -30,11 +31,12 @@ pub enum View {
     Video,
 }
 
-#[derive(Clone, Data)]
+#[derive(Clone, Data, Lens)]
 pub struct AppData {
     pub view: View,
     pub video: VideoData,
     pub event_sink: Arc<ExtEventSink>,
+    pub video_src: String,
 }
 
 impl AppData {
@@ -43,6 +45,13 @@ impl AppData {
             view: View::default(),
             video: VideoData::default(),
             event_sink: Arc::new(event_sink),
+            video_src: String::new(), // "https://test-videos.co.uk/vids/bigbuckbunny/mp4/av1/360/Big_Buck_Bunny_360_10s_1MB.mp4".to_string(),
+        }
+    }
+
+    pub fn gen_video_options(&self) -> VideoOptions {
+        VideoOptions {
+            url: self.video_src.clone(),
         }
     }
 }
@@ -50,5 +59,28 @@ impl AppData {
 impl StateWithFrame for AppData {
     fn get_curr_frame(&self) -> &Option<Frame> {
         &self.video.curr_frame
+    }
+}
+
+pub struct Delegate;
+
+impl AppDelegate<AppData> for Delegate {
+    fn command(
+        &mut self,
+        _ctx: &mut DelegateCtx,
+        _target: Target,
+        cmd: &Command,
+        data: &mut AppData,
+        _env: &Env,
+    ) -> Handled {
+        if let Some(file_info) = cmd.get(commands::OPEN_FILE) {
+            if let Some(path) = file_info.path().to_str() {
+                data.video_src = format!("file://{}", path);
+            } else {
+                println!("Failed to open file");
+            }
+            return Handled::Yes;
+        }
+        Handled::No
     }
 }
