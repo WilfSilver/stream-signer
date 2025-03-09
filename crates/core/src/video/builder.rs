@@ -1,4 +1,4 @@
-// Parts of this file is inspired by https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter
+//! Parts of this file is inspired by https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter
 
 use glib::object::{Cast, ObjectExt};
 use gstreamer::{prelude::GstBinExt, Pipeline};

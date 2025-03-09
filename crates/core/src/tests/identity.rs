@@ -9,6 +9,7 @@ use identity_iota::{
 use iota_sdk::client::secret::SecretManager;
 use rand::distr::SampleString;
 
+#[cfg(feature = "signing")]
 use crate::video::SignerInfo;
 
 use super::{
@@ -65,6 +66,7 @@ impl TestIdentity {
         )
     }
 
+    #[cfg(feature = "signing")]
     pub fn gen_signer_info(&self) -> Result<SignerInfo<'_, JwkMemStore, KeyIdMemstore>> {
         Ok(SignerInfo {
             document: &self.document,

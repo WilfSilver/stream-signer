@@ -21,7 +21,10 @@ use crate::{CredentialStore, SignFile};
 
 #[cfg(feature = "signing")]
 pub use super::sign::ChunkSigner;
+
+#[cfg(feature = "verifying")]
 use super::verify::{SignatureState, VerifiedFrame};
+
 use super::{
     frame_iter::{RgbFrame, VideoFrame, VideoFrameIter},
     framerate::Framerate,
@@ -374,7 +377,7 @@ impl SignPipeline {
     /// # let pipeline = SignPipeline::builder("https://example.com/video_feed").build()?;
     ///
     /// # let sign_file = pipeline.sign(|info| {
-    /// #   ...
+    /// #   // ...
     /// #   if !info.time.is_start() && info.time.multiple_of(100) {
     /// #     vec![
     /// #       ChunkSigner::new(time - 100, my_credential, my_keypair),
@@ -386,7 +389,7 @@ impl SignPipeline {
     ///
     /// # sign_file.write("./my_signatures.srt")
     /// ```
-    pub async fn sign<'a, F, ITER, K, I>(
+    pub async fn sign<'a, K, I, F, ITER>(
         &self,
         mut sign_with: F,
     ) -> Result<impl Iterator<Item = SignedChunk> + 'a, VideoError>
