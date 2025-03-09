@@ -37,6 +37,7 @@ pub struct AppData {
     pub video: VideoData,
     pub event_sink: Arc<ExtEventSink>,
     pub video_src: String,
+    pub signfile: String,
 }
 
 impl AppData {
@@ -45,7 +46,8 @@ impl AppData {
             view: View::default(),
             video: VideoData::default(),
             event_sink: Arc::new(event_sink),
-            video_src: String::new(), // "https://test-videos.co.uk/vids/bigbuckbunny/mp4/av1/360/Big_Buck_Bunny_360_10s_1MB.mp4".to_string(),
+            video_src: String::new(),
+            signfile: String::new(),
         }
     }
 
@@ -73,6 +75,14 @@ impl AppDelegate<AppData> for Delegate {
         data: &mut AppData,
         _env: &Env,
     ) -> Handled {
+        if let Some(file_info) = cmd.get(commands::SAVE_FILE_AS) {
+            if let Some(path) = file_info.path().to_str() {
+                data.signfile = path.into();
+            } else {
+                println!("Failed to open save location");
+            }
+            return Handled::Yes;
+        }
         if let Some(file_info) = cmd.get(commands::OPEN_FILE) {
             if let Some(path) = file_info.path().to_str() {
                 data.video_src = format!("file://{}", path);

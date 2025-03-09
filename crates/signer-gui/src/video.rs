@@ -2,14 +2,25 @@ use std::{sync::Arc, thread};
 
 use druid::{piet::CairoImage, Data, PaintCtx, Rect, RenderContext, Size, Widget};
 use futures::executor::block_on;
-use identity_iota::storage::{JwkMemStore, KeyIdMemstore};
+use identity_iota::{
+    core::FromJson,
+    credential::Subject,
+    did::DID,
+    storage::{JwkMemStore, KeyIdMemstore},
+};
+use serde_json::json;
 use stream_signer::{
     gstreamer,
-    video::{GenericImageView, ImageFns, RgbFrame},
+    tests::{
+        client::{get_client, get_resolver},
+        identity::TestIdentity,
+        issuer::TestIssuer,
+    },
+    video::{ChunkSigner, GenericImageView, ImageFns, RgbFrame},
     SignFile, SignPipeline,
 };
 
-use crate::state::{AppData, VideoOptions};
+use crate::state::{AppData, VideoOptions, View};
 
 pub trait StateWithFrame: Data {
     fn get_curr_frame(&self) -> &Option<Frame>;
@@ -70,41 +81,68 @@ impl VideoWidget {
     async fn watch_video(event_sink: Arc<druid::ExtEventSink>, options: VideoOptions) {
         gstreamer::init().expect("Failed gstreamer");
 
-        // let client = get_client();
-        // let issuer = TestIssuer::new(client.clone()).await?;
+        let client = get_client();
+        let issuer = TestIssuer::new(client.clone())
+            .await
+            .expect("Failed to create issuer");
         // let resolver = get_resolver(client);
 
-        // let identity = TestIdentity::new(&issuer, |id| {
-        //     Subject::from_json_value(json!({
-        //       "id": id.as_str(),
-        //       "name": "Alice",
-        //       "degree": {
-        //         "type": "BachelorDegree",
-        //         "name": "Bachelor of Science and Arts",
-        //       },
-        //       "GPA": "4.0",
-        //     }))
-        //     .expect("Invalid subject")
-        // })
-        // .await?;
+        let identity = TestIdentity::new(&issuer, |id| {
+            Subject::from_json_value(json!({
+              "id": id.as_str(),
+              "name": "Alice",
+              "degree": {
+                "type": "BachelorDegree",
+                "name": "Bachelor of Science and Arts",
+              },
+              "GPA": "4.0",
+            }))
+            .expect("Invalid subject")
+        })
+        .await
+        .expect("Failed to create identity");
 
         let pipe = SignPipeline::builder(&options.url)
             .build()
             .expect("Failed to build pipeline");
 
-        let _ = pipe
-            .sign::<JwkMemStore, KeyIdMemstore, _, _>(move |info| {
+        let signer = identity
+            .gen_signer_info()
+            .expect("Failed to gen signer info");
+
+        let mut is_start = true;
+        let signfile = pipe
+            .sign::<JwkMemStore, KeyIdMemstore, _, _>(|info| {
                 let frame: Frame = info.frame.into();
 
                 event_sink.add_idle_callback(move |data: &mut AppData| {
                     data.video.curr_frame = Some(frame);
                 });
 
-                return vec![].into_iter();
+                let length = 100.into();
+                if !info.time.is_start() && info.time % length == 0 {
+                    let res = vec![ChunkSigner::new(
+                        info.time.start() - length,
+                        &signer,
+                        !is_start,
+                    )];
+                    is_start = false;
+                    res
+                } else {
+                    vec![]
+                }
             })
             .await
             .expect("Failed to sign pipeline")
             .collect::<SignFile>();
+
+        // TODO: Have a button to return to the main menu
+        event_sink.add_idle_callback(move |data: &mut AppData| {
+            signfile
+                .write(&data.signfile)
+                .expect("Failed to write signfile");
+            data.view = View::MainMenu;
+        });
     }
 }
 
