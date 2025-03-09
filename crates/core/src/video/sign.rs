@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use identity_iota::{
     credential::{Jwt, JwtPresentationOptions, Presentation},
     document::CoreDocument,
@@ -61,6 +63,7 @@ where
 
     async fn sign(&self, msg: &[u8]) -> Result<Vec<u8>, JwkStorageDocumentError> {
         // Obtain the method corresponding to the given fragment.
+
         let method = self
             .document
             .resolve_method(self.fragment, None)
@@ -76,6 +79,7 @@ where
             .await
             .map_err(JwkStorageDocumentError::KeyIdStorageError)?;
 
+        // TODO: This is really slow (takes about 1 second to sign a 100ms chunk)
         let signature = <K as JwkStorage>::sign(self.storage.key_storage(), &key_id, msg, jwk)
             .await
             .map_err(JwkStorageDocumentError::KeyStorageError)?;
@@ -142,10 +146,10 @@ where
     /// in the files
     pub async fn sign(
         self,
-        msg: &[u8],
+        msg: Vec<u8>,
         size: Coord,
     ) -> Result<SignatureInfo, JwkStorageDocumentError> {
-        let signature = self.signer.sign(msg).await?;
+        let signature = self.signer.sign(&msg).await?;
         let presentation: PresentationOrId = if self.is_ref {
             self.signer.create_ref().into()
         } else {
