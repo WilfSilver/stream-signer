@@ -173,8 +173,14 @@ mod tests {
 
         pin!(filtered);
 
+        let mut i = 0;
         while let Some(thing) = filtered.next().await {
-            println!("Current Value: {thing:?}");
+            println!("Thing {:?}", thing);
+            i += 1;
+            assert_eq!(*thing.0, i);
+            for (j, v) in thing.1.iter().enumerate() {
+                assert_eq!(**v, i + j + 1)
+            }
         }
     }
 }

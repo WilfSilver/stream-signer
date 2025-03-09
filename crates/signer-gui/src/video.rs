@@ -11,11 +11,7 @@ use identity_iota::{
 use serde_json::json;
 use stream_signer::{
     gstreamer,
-    tests::{
-        client::{get_client, get_resolver},
-        identity::TestIdentity,
-        issuer::TestIssuer,
-    },
+    tests::{client::get_client, identity::TestIdentity, issuer::TestIssuer},
     video::{ChunkSigner, GenericImageView, ImageFns, RgbFrame},
     SignFile, SignPipeline,
 };
