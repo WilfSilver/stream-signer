@@ -138,8 +138,7 @@ impl VideoWidget {
 
         let pipe = SignPipeline::build_from_path(&options.src)
             .expect("Invalid path given")
-            .frame_rate(FramerateOption::Auto)
-            .unwrap() // Unreachable
+            .with_frame_rate(FramerateOption::Auto)
             .build()
             .expect("Failed to build pipeline");
 
@@ -241,7 +240,6 @@ impl Widget<VideoData> for VideoWidget {
         data: &VideoData,
         _env: &druid::Env,
     ) {
-        println!("{:?}", event);
         match event {
             LifeCycle::WidgetAdded => {
                 // Sneakily use this to gain focus
@@ -286,7 +284,7 @@ impl Widget<VideoData> for VideoWidget {
                 let sbl = sign_border_length as f64;
                 ctx.stroke(
                     rect,
-                    &Color::rgb((sbl - *time_since_last_sign as f64) / sbl, 0., 0.),
+                    &Color::rgba(1., 0., 0., (sbl - *time_since_last_sign as f64) / sbl),
                     50.,
                 );
             }

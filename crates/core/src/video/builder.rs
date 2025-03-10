@@ -5,56 +5,17 @@ use std::path::Path;
 use glib::object::ObjectExt;
 use gstreamer::{
     element_factory::ElementBuilder,
-    prelude::{ElementExt, ElementExtManual, GstBinExtManual, PadExt},
+    prelude::{ElementExt, GstBinExtManual, PadExt},
     Element, ElementFactory, Pipeline,
 };
 
-use super::{Framerate, SignPipeline, VideoError};
-
-pub struct CustomFramerate<'a> {
-    pub capsfilter: ElementBuilder<'a>,
-    pub videorate: ElementBuilder<'a>,
-    pub framerate: Framerate<usize>,
-}
-
-impl<'a> CustomFramerate<'a> {
-    pub fn new(frames: usize, seconds: usize) -> Self {
-        Framerate::new(frames, seconds).into()
-    }
-
-    /// Returns a string of the arguments which set the framerate for the gstreamer pipeline
-    ///
-    /// See [gstreamer::parse::launch]
-    pub fn into_args(self) -> Result<impl IntoIterator<Item = Element>, glib::BoolError> {
-        let numer = self.framerate.frames();
-        let denom = self.framerate.seconds();
-
-        let caps = self.capsfilter.build()?;
-
-        Ok([caps, self.videorate.build()?])
-
-        // format!(
-        //     "videorate name=rate ! capsfilter name=ratefilter ! video/x-raw,framerate={numer}/{denom} ! "
-        // )
-    }
-}
-
-impl<'a> From<Framerate<usize>> for CustomFramerate<'a> {
-    fn from(value: Framerate<usize>) -> Self {
-        Self {
-            capsfilter: ElementFactory::make("videorate").property("name", "rate"),
-            videorate: ElementFactory::make("capsfilter").property("name", "ratefilter"),
-            framerate: value,
-        }
-    }
-}
+use super::{SignPipeline, VideoError};
 
 #[derive(Default)]
-pub enum FramerateOption<'a> {
+pub enum FramerateOption {
     #[default]
     Fastest,
     Auto,
-    Custom(CustomFramerate<'a>),
 }
 
 /// Enables building, signing and verifying videos outputing to a given [SignFile]
@@ -62,12 +23,8 @@ pub struct SignPipelineBuilder<'a> {
     pub src: ElementBuilder<'a>,
     pub convert: ElementBuilder<'a>,
     pub sink: ElementBuilder<'a>,
-    pub extras: Vec<Element>,
-    // uri: Option<String>,
+    pub extras: Result<Vec<Element>, glib::BoolError>,
     start_offset: Option<f64>,
-    // buffer_size: u32,
-    // sink_name: String,
-    // max_buffers: u32,
 }
 
 impl<'a> SignPipelineBuilder<'a> {
@@ -83,52 +40,108 @@ impl<'a> SignPipelineBuilder<'a> {
             src: ElementFactory::make("uridecodebin")
                 .property("uri", uri.to_string())
                 .property("buffer-size", 1_i32),
+            // .property("caps", caps),
             convert: ElementFactory::make("videoconvert"),
             sink: ElementFactory::make("appsink")
                 .property("name", "sink")
                 .property("sync", false)
                 .property("max-buffers", 1_u32)
                 .property("drop", false),
-            extras: vec![],
+            extras: Ok(vec![]),
             start_offset: None,
         }
     }
 
     /// Sets the buffer size for the URI we are recording
-    pub fn buffer_size(mut self, size: i32) -> Self {
+    pub fn with_buffer_size(mut self, size: i32) -> Self {
         self.src = self.src.property("buffer-size", size);
         self
     }
 
     /// Sets the buffer size for the URI we are recording
-    pub fn max_buffers(mut self, num: u32) -> Self {
+    pub fn with_max_buffers(mut self, num: u32) -> Self {
         self.sink = self.sink.property("max-buffers", num);
+        self
+    }
+
+    pub fn with_known_extra(self, extra: Element) -> Self {
+        self.with_extra(Ok(extra))
+    }
+
+    pub fn with_known_extras<I>(self, extras: I) -> Self
+    where
+        I: IntoIterator<Item = Element>,
+    {
+        self.with_potential_extras(Ok(extras))
+    }
+
+    pub fn with_extra(mut self, extra: Result<Element, glib::BoolError>) -> Self {
+        match &mut self.extras {
+            Ok(extras) => match extra {
+                Ok(value) => extras.push(value),
+                Err(e) => self.extras = Err(e),
+            },
+            _ => {}
+        }
+        self
+    }
+
+    pub fn with_potential_extras<I>(mut self, extras: Result<I, glib::BoolError>) -> Self
+    where
+        I: IntoIterator<Item = Element>,
+    {
+        match &mut self.extras {
+            Ok(old_extras) => match extras {
+                Ok(values) => old_extras.extend(values),
+                Err(e) => {
+                    self.extras = Err(e);
+                }
+            },
+            _ => {}
+        }
+        self
+    }
+
+    pub fn with_extras<I>(mut self, extras: I) -> Self
+    where
+        I: IntoIterator<Item = Result<Element, glib::BoolError>>,
+    {
+        match &mut self.extras {
+            Ok(old_extras) => {
+                for e in extras {
+                    match e {
+                        Ok(value) => old_extras.push(value),
+                        Err(e) => {
+                            self.extras = Err(e);
+                            break;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
         self
     }
 
     /// Change the frame rate of the iterator. The argument is a fraction, for example:
     /// * For a framerate of one per 3 seconds, use (1, 3).
     /// * For a framerate of 12.34 frames per second use (1234 / 100).
-    pub fn frame_rate(mut self, fps: FramerateOption<'a>) -> Result<Self, VideoError> {
+    pub fn with_frame_rate(mut self, fps: FramerateOption) -> Self {
         match fps {
             FramerateOption::Fastest => self.sink = self.sink.property("sync", false),
             FramerateOption::Auto => self.sink = self.sink.property("sync", true),
-            FramerateOption::Custom(fps) => {
-                self.sink = self.sink.property("sync", true);
-                self.extras.extend(fps.into_args()?.into_iter());
-            }
         }
-        Ok(self)
+        self
     }
 
     /// Jump to the given time in seconds before beginning to return frames.
-    pub fn start_offset(mut self, seconds: f64) -> Self {
+    pub fn with_start_offset(mut self, seconds: f64) -> Self {
         self.start_offset = Some(seconds);
         self
     }
 
     /// Sets the appsink name
-    pub fn sink_name<S: ToString>(mut self, sink_name: S) -> Self {
+    pub fn with_sink_name<S: ToString>(mut self, sink_name: S) -> Self {
         self.sink = self.sink.property("name", sink_name.to_string());
         self
     }
@@ -149,23 +162,26 @@ impl<'a> SignPipelineBuilder<'a> {
         let src = self.src.build()?;
         let convert = self.convert.build()?;
         let sink = self.sink.build()?;
+        let extras = self.extras?;
 
         let pipeline = gstreamer::Pipeline::new();
-        pipeline.add_many(
-            [&src, &convert, &sink]
-                .into_iter()
-                .chain(self.extras.iter()),
-        )?;
+        let chain = [&src]
+            .into_iter()
+            .chain(extras.iter())
+            .chain([&convert, &sink].into_iter());
 
-        convert.link(&sink).unwrap();
+        pipeline.add_many(chain.clone())?;
+        // We dynamically link the source later on
+        Element::link_many(chain.skip(1))?;
 
         // Connect the 'pad-added' signal to dynamically link the source to the converter
         src.connect_pad_added(move |_, pad| {
-            let convert_pad = convert
+            let first_pad = extras
+                .first()
+                .unwrap_or(&convert)
                 .static_pad(&sink.property::<String>("name"))
-                .unwrap();
-            println!("{:?}", convert_pad);
-            pad.link(&convert_pad).unwrap();
+                .expect("Could not get expected sink");
+            pad.link(&first_pad).expect("Could not link pad to appsink");
         });
 
         Ok(pipeline)

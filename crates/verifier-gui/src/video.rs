@@ -88,7 +88,8 @@ impl VideoWidget {
         // })
         // .await?;
 
-        let pipe = SignPipeline::builder(&options.url)
+        let pipe = SignPipeline::build_from_path(&options.url)
+            .expect("Invalid path given")
             .build()
             .expect("Failed to build pipeline");
 

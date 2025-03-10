@@ -3,7 +3,6 @@ use std::{
     ops::{Div, Mul},
 };
 
-use gstreamer::{Element, ElementFactory};
 use num_traits::NumCast;
 
 use crate::time::ONE_SECOND_MILLIS;
@@ -27,7 +26,6 @@ impl<T> FramerateCompatible for T where
 /// function, for example if you wish outputs as floats you can convert between
 /// them.
 ///
-/// TODO: Come up with system for enum, Fastest, Auto, Set
 #[derive(Debug, Clone, Copy)]
 pub struct Framerate<T>(T, T)
 where
@@ -51,27 +49,6 @@ where
     /// The number of seconds which has the given number of frames (see [Self::frames])
     pub const fn seconds(&self) -> T {
         self.1
-    }
-
-    /// Returns a string of the arguments which set the framerate for the gstreamer pipeline
-    ///
-    /// See [gstreamer::parse::launch]
-    pub fn get_args(&self) -> Result<impl IntoIterator<Item = Element>, glib::BoolError> {
-        let numer = self.frames();
-        let denom = self.seconds();
-
-        Ok([
-            ElementFactory::make("videorate")
-                .property("name", "rate")
-                .build()?,
-            ElementFactory::make("capsfilter")
-                .property("name", "ratefilter")
-                .build()?,
-        ])
-
-        // format!(
-        //     "videorate name=rate ! capsfilter name=ratefilter ! video/x-raw,framerate={numer}/{denom} ! "
-        // )
     }
 
     /// This simply converts [Self::seconds] into milliseconds by multiplying
