@@ -27,7 +27,7 @@ use super::{frame_iter::RgbFrame, Framerate};
 /// #   // Do something
 /// # }
 /// ```
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TimeRange {
     start: f64,
     end: f64,

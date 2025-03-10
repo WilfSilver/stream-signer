@@ -3,7 +3,10 @@ use druid::{
     FileDialogOptions, FileSpec, Widget, WidgetExt,
 };
 
-use crate::state::{AppData, View};
+use crate::{
+    state::{AppData, View},
+    video::{VideoData, VideoOptions},
+};
 
 pub fn make_menu_ui() -> impl Widget<AppData> {
     Flex::column()
@@ -12,7 +15,6 @@ pub fn make_menu_ui() -> impl Widget<AppData> {
         .with_child(
             Button::new("Go to video!")
                 .on_click(|_event, data: &mut AppData, _env| {
-                    println!("Simple button clicked!");
                     data.view = View::Video;
                 })
                 .fix_width(150.)
@@ -32,7 +34,14 @@ fn make_signfile_picker() -> impl Widget<AppData> {
         .button_text("Save to");
 
     Flex::row()
-        .with_flex_child(TextBox::new().lens(AppData::signfile).fix_width(500.), 1.0)
+        .with_flex_child(
+            TextBox::new()
+                .lens(VideoOptions::output)
+                .lens(VideoData::options)
+                .lens(AppData::video)
+                .fix_width(500.),
+            1.0,
+        )
         .with_child(
             Button::new("Save sign to")
                 .on_click(move |ctx, _data: &mut AppData, _env| {
@@ -58,7 +67,14 @@ fn make_video_picker() -> impl Widget<AppData> {
         .button_text("Open");
 
     Flex::row()
-        .with_flex_child(TextBox::new().lens(AppData::video_src).fix_width(500.), 1.0)
+        .with_flex_child(
+            TextBox::new()
+                .lens(VideoOptions::src)
+                .lens(VideoData::options)
+                .lens(AppData::video)
+                .fix_width(500.),
+            1.0,
+        )
         .with_child(
             Button::new("Open file")
                 .on_click(move |ctx, _data: &mut AppData, _env| {
