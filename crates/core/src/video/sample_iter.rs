@@ -30,21 +30,6 @@ impl SampleIter {
     pub fn new(pipeline: gst::Pipeline) -> Self {
         let sink = "sink".to_string();
 
-        let appsink = pipeline
-            .by_name(&sink)
-            .expect("Sink element not found")
-            .downcast::<gst_app::AppSink>()
-            .expect("Sink element is expected to be an appsink!");
-
-        // Tell the appsink what format we want.
-        // This can be set after linking the two objects, because format negotiation between
-        // both elements will happen during pre-rolling of the pipeline.
-        // appsink.set_caps(Some(
-        //     &gst::Caps::builder("video/x-raw")
-        //         .field("format", gst_video::VideoFormat::Rgb)
-        //         .build(),
-        // ));
-
         Self {
             pipeline,
             timeout: 30 * gst::ClockTime::SECOND,

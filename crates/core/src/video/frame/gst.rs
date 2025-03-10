@@ -42,7 +42,6 @@ impl Clone for Frame {
 impl From<gst::Sample> for Frame {
     fn from(sample: gst::Sample) -> Self {
         let caps = sample.caps().expect("Sample without caps");
-        println!("{}", caps.to_string());
         let info = gst_video::VideoInfo::from_caps(caps).expect("Failed to parse caps");
 
         let buffer = sample
@@ -61,12 +60,6 @@ impl GenericImageView for Frame {
 
     fn dimensions(&self) -> (u32, u32) {
         (self.width(), self.height())
-        // println!("w: {}, h: {}", self.width(), self.height());
-        // self.as_flat()
-        //     .as_view::<image::Rgb<u8>>()
-        //     .expect("unreachable")
-        //     .dimensions()
-        // (self.width(), self.height())
     }
 
     fn get_pixel(&self, x: u32, y: u32) -> Self::Pixel {

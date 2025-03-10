@@ -39,16 +39,11 @@ pub const MAX_CHUNK_LENGTH: usize = 10 * ONE_SECOND_MILLIS as usize;
 pub struct SignPipeline {
     pipe: Pipeline,
     start_offset: Option<f64>,
-    fps: Option<Framerate<usize>>, // TODO: Get from pipeline
 }
 
 impl SignPipeline {
-    pub fn new(pipe: Pipeline, start_offset: Option<f64>, fps: Option<Framerate<usize>>) -> Self {
-        Self {
-            pipe,
-            start_offset,
-            fps,
-        }
+    pub fn new(pipe: Pipeline, start_offset: Option<f64>) -> Self {
+        Self { pipe, start_offset }
     }
 
     /// Uses the builder API to create a Pipeline
@@ -162,10 +157,23 @@ impl SignPipeline {
         // TODO: Change to FrameError (separating VideoError + FrameError)
     ) -> Result<impl Stream<Item = Result<Pin<Box<VerifiedFrame>>, VideoError>> + use<'a>, VideoError>
     {
-        let fps = self.fps.unwrap_or_default();
+        let mut iter = self
+            .try_iter()?
+            .map(|r| r.map(Frame::from))
+            .enumerate()
+            .peekable();
 
-        let iter = self.try_iter()?.map(|r| r.map(Frame::from)).enumerate();
-        let delayed = DelayedStream::<_, _>::new(MAX_CHUNK_LENGTH, stream::iter(iter));
+        let buf_capacity = match iter.peek() {
+            Some(first) => first
+                .1
+                .as_ref()
+                .map_err(|e| e.clone())?
+                .fps()
+                .convert_to_frames(MAX_CHUNK_LENGTH),
+            None => 0,
+        };
+
+        let delayed = DelayedStream::<_, _>::new(buf_capacity, stream::iter(iter));
 
         let state_cache: Arc<Mutex<HashMap<(Timestamp, &Vec<u8>), SignatureState>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -191,9 +199,10 @@ impl SignPipeline {
 
                     let size = Coord::new(frame.width(), frame.height());
 
-                    let (timestamp, _) = Timestamp::from_frames(i, fps, self.start_offset);
+                    let (timestamp, _) = Timestamp::from_frames(i, frame.fps(), self.start_offset);
 
                     let buf_ref = &buffer;
+                    let fps = frame.fps();
 
                     let sigs_iter = stream::iter(signfile.get_signatures_at(timestamp).into_iter())
                         .map(|sig| {
@@ -372,8 +381,21 @@ impl SignPipeline {
         F: FnMut(FrameInfo) -> ITER,
         ITER: IntoIterator<Item = ChunkSigner<'a, K, I>>,
     {
-        let fps = self.fps.unwrap_or_default();
-        let buf_capacity = fps.convert_to_frames(MAX_CHUNK_LENGTH);
+        let mut iter = self
+            .try_iter()?
+            .map(|s| s.map(Frame::from))
+            .enumerate()
+            .peekable();
+
+        let buf_capacity = match iter.peek() {
+            Some(first) => first
+                .1
+                .as_ref()
+                .map_err(|e| e.clone())?
+                .fps()
+                .convert_to_frames(MAX_CHUNK_LENGTH),
+            None => 0,
+        };
         let mut frame_buffer: VecDeque<Frame> = VecDeque::with_capacity(buf_capacity);
 
         let mut futures: Vec<(Timestamp, _)> = vec![];
@@ -381,6 +403,8 @@ impl SignPipeline {
         // TODO: Somehow swap to iter/stream
         for (i, frame) in self.try_iter()?.enumerate() {
             let frame: Frame = frame?.into();
+            let fps = frame.fps();
+
             if frame_buffer.len() == buf_capacity {
                 frame_buffer.pop_front();
             }
