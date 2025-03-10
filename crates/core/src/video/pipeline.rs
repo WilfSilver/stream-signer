@@ -9,6 +9,7 @@ use identity_iota::verification::jws::{JwsAlgorithm, VerificationInput};
 use image::GenericImageView;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -57,7 +58,11 @@ impl SignPipeline {
     }
 
     /// Uses the builder API to create a Pipeline
-    pub fn builder<S: AsRef<str>>(uri: S) -> SignPipelineBuilder {
+    pub fn build_from_path<P: AsRef<Path>>(path: &P) -> Option<SignPipelineBuilder> {
+        SignPipelineBuilder::from_path(path)
+    }
+
+    pub fn build<'a, S: ToString>(uri: S) -> SignPipelineBuilder<'a> {
         SignPipelineBuilder::from_uri(uri)
     }
 
@@ -511,14 +516,14 @@ mod tests {
 
         let filepath = test_video(videos::BIG_BUNNY);
 
-        let pipe = SignPipeline::builder(filepath.clone()).build()?;
+        let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
         let signfile = pipe
             .sign_chunks(100, &identity.gen_signer_info()?)
             .await?
             .collect::<SignFile>();
 
-        let pipe = SignPipeline::builder(filepath).build()?;
+        let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
         pipe.verify(resolver, &signfile)?
             .for_each(|v| {

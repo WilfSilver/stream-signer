@@ -4,12 +4,11 @@ use std::{
         Arc,
     },
     thread,
-    time::Duration,
 };
 
 use druid::{
-    keyboard_types::Key, piet::CairoImage, Code, Color, Data, Event, Lens, LifeCycle, LifeCycleCtx,
-    PaintCtx, Rect, RenderContext, Size, Widget,
+    piet::CairoImage, Code, Color, Data, Event, Lens, LifeCycle, LifeCycleCtx, PaintCtx, Rect,
+    RenderContext, Size, Widget,
 };
 use futures::executor::block_on;
 use identity_iota::{
@@ -23,7 +22,10 @@ use stream_signer::{
     file::Timestamp,
     gstreamer,
     tests::{client::get_client, identity::TestIdentity, issuer::TestIssuer},
-    video::{ChunkSigner, FrameInfo, GenericImageView, ImageFns, TimeRange, MAX_CHUNK_LENGTH},
+    video::{
+        ChunkSigner, FrameInfo, FramerateOption, GenericImageView, ImageFns, TimeRange,
+        MAX_CHUNK_LENGTH,
+    },
     SignFile, SignPipeline,
 };
 
@@ -134,7 +136,10 @@ impl VideoWidget {
         .await
         .expect("Failed to create identity");
 
-        let pipe = SignPipeline::builder(&options.src)
+        let pipe = SignPipeline::build_from_path(&options.src)
+            .expect("Invalid path given")
+            .frame_rate(FramerateOption::Auto)
+            .unwrap() // Unreachable
             .build()
             .expect("Failed to build pipeline");
 

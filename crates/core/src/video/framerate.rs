@@ -3,6 +3,7 @@ use std::{
     ops::{Div, Mul},
 };
 
+use gstreamer::{Element, ElementFactory};
 use num_traits::NumCast;
 
 use crate::time::ONE_SECOND_MILLIS;
@@ -55,12 +56,22 @@ where
     /// Returns a string of the arguments which set the framerate for the gstreamer pipeline
     ///
     /// See [gstreamer::parse::launch]
-    pub fn get_args(&self) -> String {
+    pub fn get_args(&self) -> Result<impl IntoIterator<Item = Element>, glib::BoolError> {
         let numer = self.frames();
         let denom = self.seconds();
-        format!(
-            "videorate name=rate ! capsfilter name=ratefilter ! video/x-raw,framerate={numer}/{denom} ! "
-        )
+
+        Ok([
+            ElementFactory::make("videorate")
+                .property("name", "rate")
+                .build()?,
+            ElementFactory::make("capsfilter")
+                .property("name", "ratefilter")
+                .build()?,
+        ])
+
+        // format!(
+        //     "videorate name=rate ! capsfilter name=ratefilter ! video/x-raw,framerate={numer}/{denom} ! "
+        // )
     }
 
     /// This simply converts [Self::seconds] into milliseconds by multiplying
