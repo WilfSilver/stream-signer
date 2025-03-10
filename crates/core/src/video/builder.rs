@@ -2,14 +2,14 @@
 
 use std::path::Path;
 
-use glib::object::{Cast, ObjectExt};
+use glib::object::ObjectExt;
 use gst::{
     element_factory::ElementBuilder,
-    prelude::{ElementExt, ElementExtManual, GstBinExt, GstBinExtManual, PadExt},
-    Caps, Element, ElementFactory, Fraction, Pipeline,
+    prelude::{ElementExt, ElementExtManual, GstBinExtManual, PadExt},
+    Element, ElementFactory, Pipeline,
 };
 
-use super::{Framerate, SignPipeline, VideoError};
+use super::{SignPipeline, VideoError};
 
 #[derive(Default)]
 pub enum FramerateOption {
@@ -150,11 +150,7 @@ impl<'a> SignPipelineBuilder<'a> {
     /// later
     pub fn build(self) -> Result<SignPipeline, VideoError> {
         let start = self.start_offset;
-        Ok(SignPipeline::new(
-            self.build_raw_pipeline()?.0,
-            start,
-            None, // TODO: Autodetect framerate
-        ))
+        Ok(SignPipeline::new(self.build_raw_pipeline()?.0, start))
     }
 
     fn build_raw_pipeline(self) -> Result<(Pipeline, String), VideoError> {
@@ -195,19 +191,6 @@ impl<'a> SignPipelineBuilder<'a> {
                     .to_string()
             );
         });
-
-        // let appsink = pipeline
-        //     .by_name(&sink_name)
-        //     .expect("Sink element not found")
-        //     .downcast::<gst_app::AppSink>()
-        //     .expect("Sink element is expected to be an appsink!");
-
-        // Tell the appsink what format we want.
-        // This can be set after linking the two objects, because format negotiation between
-        // both elements will happen during pre-rolling of the pipeline.
-        // appsink.set_caps(Some(
-        //     &,
-        // ));
 
         Ok((pipeline, sink_name))
     }
