@@ -1,6 +1,16 @@
-use std::{sync::Arc, thread};
+use std::{
+    sync::{
+        atomic::{AtomicBool, AtomicU32, Ordering},
+        Arc,
+    },
+    thread,
+    time::Duration,
+};
 
-use druid::{piet::CairoImage, Data, PaintCtx, Rect, RenderContext, Size, Widget};
+use druid::{
+    keyboard_types::Key, piet::CairoImage, Code, Color, Data, Event, Lens, LifeCycle, LifeCycleCtx,
+    PaintCtx, Rect, RenderContext, Size, Widget,
+};
 use futures::executor::block_on;
 use identity_iota::{
     core::FromJson,
@@ -10,19 +20,30 @@ use identity_iota::{
 };
 use serde_json::json;
 use stream_signer::{
+    file::Timestamp,
     gstreamer,
     tests::{client::get_client, identity::TestIdentity, issuer::TestIssuer},
-    video::{ChunkSigner, GenericImageView, ImageFns, RgbFrame},
+    video::{ChunkSigner, FrameInfo, GenericImageView, ImageFns, TimeRange, MAX_CHUNK_LENGTH},
     SignFile, SignPipeline,
 };
 
-use crate::state::{AppData, VideoOptions, View};
+use crate::state::{AppData, View};
 
-pub trait StateWithFrame: Data {
-    fn get_curr_frame(&self) -> &Option<Frame>;
+#[derive(Clone, Data, Default, Lens)]
+pub struct VideoOptions {
+    pub src: String,
+    pub output: String,
+}
 
-    fn get_curr_image(&self, ctx: &mut PaintCtx<'_, '_, '_>) -> Option<CairoImage> {
-        match self.get_curr_frame() {
+#[derive(Clone, Data, Default, Lens)]
+pub struct VideoData {
+    pub curr_frame: Option<Frame>,
+    pub options: VideoOptions,
+}
+
+impl VideoData {
+    pub fn get_curr_image(&self, ctx: &mut PaintCtx<'_, '_, '_>) -> Option<CairoImage> {
+        match &self.curr_frame {
             Some(frame) => Some(
                 ctx.make_image(
                     frame.width,
@@ -42,18 +63,25 @@ pub trait StateWithFrame: Data {
 pub struct Frame {
     pub width: usize,
     pub height: usize,
+    pub time: TimeRange,
     pub buf: Box<[u8]>,
 }
 
-impl From<&RgbFrame> for Frame {
-    fn from(value: &RgbFrame) -> Self {
-        let (width, height) = value.dimensions();
+impl<'a> From<FrameInfo<'a>> for Frame {
+    fn from(value: FrameInfo<'a>) -> Self {
+        let (width, height) = value.frame.dimensions();
 
-        let buf = value.as_flat().as_slice().to_owned().into_boxed_slice();
+        let buf = value
+            .frame
+            .as_flat()
+            .as_slice()
+            .to_owned()
+            .into_boxed_slice();
 
         Frame {
             width: width as usize,
             height: height as usize,
+            time: value.time,
             buf,
         }
     }
@@ -65,16 +93,24 @@ impl Data for Frame {
     }
 }
 
-#[derive(Default)]
-pub struct VideoWidget {}
+pub struct VideoWidget {
+    sign_info: Arc<(AtomicBool, AtomicU32)>,
+}
 
 impl VideoWidget {
-    pub fn new(event_sink: Arc<druid::ExtEventSink>, options: VideoOptions) -> Self {
-        thread::spawn(move || block_on(Self::watch_video(event_sink, options)));
-        VideoWidget::default()
+    pub fn new() -> Self {
+        let sign_last_chunk = Arc::new((AtomicBool::new(false), AtomicU32::new(0)));
+
+        VideoWidget {
+            sign_info: sign_last_chunk,
+        }
     }
 
-    async fn watch_video(event_sink: Arc<druid::ExtEventSink>, options: VideoOptions) {
+    async fn watch_video(
+        event_sink: druid::ExtEventSink,
+        sign_last_chunk: Arc<(AtomicBool, AtomicU32)>,
+        options: VideoOptions,
+    ) {
         gstreamer::init().expect("Failed gstreamer");
 
         let client = get_client();
@@ -98,7 +134,7 @@ impl VideoWidget {
         .await
         .expect("Failed to create identity");
 
-        let pipe = SignPipeline::builder(&options.url)
+        let pipe = SignPipeline::builder(&options.src)
             .build()
             .expect("Failed to build pipeline");
 
@@ -106,23 +142,31 @@ impl VideoWidget {
             .gen_signer_info()
             .expect("Failed to gen signer info");
 
-        let mut is_start = true;
+        // Cache of the last sign, also stored in the AtomicU32 (but stored as
+        // timestamp)
+        let mut last_sign: Timestamp = 0.into();
         let signfile = pipe
             .sign::<JwkMemStore, KeyIdMemstore, _, _>(|info| {
-                let frame: Frame = info.frame.into();
+                let time = info.time;
+
+                let frame: Frame = info.into();
 
                 event_sink.add_idle_callback(move |data: &mut AppData| {
                     data.video.curr_frame = Some(frame);
                 });
 
-                let length = 100.into();
-                if !info.time.is_start() && info.time % length == 0 {
-                    let res = vec![ChunkSigner::new(
-                        info.time.start() - length,
-                        &signer,
-                        !is_start,
-                    )];
-                    is_start = false;
+                // We want to sign when requested, or if the next frame is going to be past the
+                // maximum chunk signing length
+                let next_frame_time = *(time.start() - last_sign) as f64 + time.frame_duration();
+                if sign_last_chunk.0.load(Ordering::Relaxed)
+                    || next_frame_time >= MAX_CHUNK_LENGTH as f64
+                {
+                    let res = vec![ChunkSigner::new(last_sign, &signer, last_sign == 0.into())];
+
+                    sign_last_chunk.0.store(false, Ordering::Relaxed);
+                    last_sign = time.start();
+                    sign_last_chunk.1.store(last_sign.into(), Ordering::Relaxed);
+
                     res
                 } else {
                     vec![]
@@ -135,24 +179,41 @@ impl VideoWidget {
         // TODO: Have a button to return to the main menu
         event_sink.add_idle_callback(move |data: &mut AppData| {
             signfile
-                .write(&data.signfile)
+                .write(&data.video.options.output)
                 .expect("Failed to write signfile");
             data.view = View::MainMenu;
         });
     }
 }
 
-impl<S: StateWithFrame> Widget<S> for VideoWidget {
+impl Widget<VideoData> for VideoWidget {
     fn event(
         &mut self,
-        _ctx: &mut druid::EventCtx,
-        _event: &druid::Event,
-        _data: &mut S,
+        ctx: &mut druid::EventCtx,
+        event: &Event,
+        _data: &mut VideoData,
         _env: &druid::Env,
     ) {
+        match event {
+            Event::KeyDown(id) => {
+                if id.code == Code::Space {
+                    self.sign_info.0.store(true, Ordering::Relaxed);
+                    ctx.set_handled();
+                }
+            }
+            // We use animation frame to get focus on start
+            Event::AnimFrame(_) => ctx.request_focus(),
+            _ => {}
+        }
     }
 
-    fn update(&mut self, ctx: &mut druid::UpdateCtx, old_data: &S, data: &S, _env: &druid::Env) {
+    fn update(
+        &mut self,
+        ctx: &mut druid::UpdateCtx,
+        old_data: &VideoData,
+        data: &VideoData,
+        _env: &druid::Env,
+    ) {
         if !old_data.same(data) {
             ctx.request_paint();
         }
@@ -162,30 +223,37 @@ impl<S: StateWithFrame> Widget<S> for VideoWidget {
         &mut self,
         _ctx: &mut druid::LayoutCtx,
         bc: &druid::BoxConstraints,
-        _data: &S,
+        _data: &VideoData,
         _env: &druid::Env,
     ) -> druid::Size {
         bc.max()
-        // bc.constrain(
-        //     data.get_curr_frame()
-        //         .as_ref()
-        //         .map(|f| (f.width as f64, f.height as f64))
-        //         .unwrap_or((100., 100.)),
-        // )
     }
 
     fn lifecycle(
         &mut self,
-        _ctx: &mut druid::LifeCycleCtx,
-        _event: &druid::LifeCycle,
-        _data: &S,
+        ctx: &mut LifeCycleCtx,
+        event: &LifeCycle,
+        data: &VideoData,
         _env: &druid::Env,
     ) {
+        println!("{:?}", event);
+        match event {
+            LifeCycle::WidgetAdded => {
+                // Sneakily use this to gain focus
+                ctx.request_anim_frame();
+
+                let event_sink = ctx.get_external_handle();
+                let sign_info = self.sign_info.clone();
+                let options = data.options.clone();
+                thread::spawn(move || block_on(Self::watch_video(event_sink, sign_info, options)));
+            }
+            _ => {}
+        }
     }
 
-    fn paint(&mut self, ctx: &mut druid::PaintCtx, data: &S, _env: &druid::Env) {
+    fn paint(&mut self, ctx: &mut druid::PaintCtx, data: &VideoData, _env: &druid::Env) {
         if let Some(image) = data.get_curr_image(ctx) {
-            let frame = data.get_curr_frame().as_ref().unwrap();
+            let frame = data.curr_frame.as_ref().unwrap();
             let f_width = frame.width as f64;
             let f_height = frame.height as f64;
 
@@ -205,6 +273,18 @@ impl<S: StateWithFrame> Widget<S> for VideoWidget {
             let rect = Rect::new(x, y, x + size.width, y + size.height);
 
             ctx.draw_image(&image, rect, druid::piet::InterpolationMode::Bilinear);
+
+            let sign_border_length = 500;
+            let time_since_last_sign =
+                frame.time.start() - self.sign_info.1.load(Ordering::Relaxed);
+            if time_since_last_sign < sign_border_length.into() {
+                let sbl = sign_border_length as f64;
+                ctx.stroke(
+                    rect,
+                    &Color::rgb((sbl - *time_since_last_sign as f64) / sbl, 0., 0.),
+                    50.,
+                );
+            }
         }
     }
 }

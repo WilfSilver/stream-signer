@@ -11,7 +11,6 @@ pub fn make_menu_ui() -> impl Widget<AppData> {
         .with_child(
             Button::new("Go to video!")
                 .on_click(|_event, data: &mut AppData, _env| {
-                    println!("Simple button clicked!");
                     data.view = View::Video;
                 })
                 .fix_width(150.)

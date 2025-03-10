@@ -1,4 +1,5 @@
 mod app;
+mod debug;
 mod menu;
 mod state;
 mod video;
