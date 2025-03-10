@@ -14,7 +14,7 @@ pub mod videos {
 /// Returns the full URL to the given video in the `tests/videos` directory
 pub fn test_video<S: AsRef<str>>(name: S) -> String {
     format!(
-        "file://{}/tests/videos/{}",
+        "{}/tests/videos/{}",
         env::current_dir().unwrap().to_str().unwrap(),
         name.as_ref()
     )

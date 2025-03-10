@@ -51,7 +51,7 @@ impl AppDelegate<AppData> for Delegate {
         }
         if let Some(file_info) = cmd.get(commands::OPEN_FILE) {
             if let Some(path) = file_info.path().to_str() {
-                data.video.options.src = format!("file://{}", path);
+                data.video.options.src = path.to_string(); //format!("file://{}", path);
             } else {
                 println!("Failed to open file");
             }
