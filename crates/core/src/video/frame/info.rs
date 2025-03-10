@@ -2,7 +2,7 @@ use std::ops::{Bound, Range, RangeBounds, Rem};
 
 use crate::file::Timestamp;
 
-use super::{frame_iter::RgbFrame, Framerate};
+use super::{Frame, Framerate};
 
 /// This stores information about the timestamp. Due to the fact that the
 /// iterator does not run for every millisecond, instead running for every
@@ -126,15 +126,17 @@ impl Rem<Timestamp> for TimeRange {
 }
 
 #[derive(Debug)]
-pub struct FrameInfo<'a> {
-    pub frame: &'a RgbFrame,
+pub struct FrameInfo {
+    /// Stores the frame itself, it is okay to clone the frame due to the fact
+    /// [Frame::clone] does not clone the underlying object
+    pub frame: Frame,
     pub time: TimeRange,
     frame_idx: usize,
 }
 
-impl<'a> FrameInfo<'a> {
+impl FrameInfo {
     pub fn new(
-        frame: &'a RgbFrame,
+        frame: Frame,
         timestamp: Timestamp,
         frame_idx: usize,
         fps: Framerate<usize>,

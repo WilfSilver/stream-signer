@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::{Signer, SignerState, UnknownKey};
 
-use super::frame_iter::RgbFrame;
+use super::Frame;
 
 #[derive(Debug, Clone)]
 pub struct UnverifiedSignature {
@@ -62,6 +62,6 @@ impl SignatureState {
 
 #[derive(Debug)]
 pub struct VerifiedFrame {
-    pub frame: RgbFrame,
+    pub frame: Frame,
     pub sigs: Vec<SignatureState>,
 }

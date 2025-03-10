@@ -105,3 +105,9 @@ impl From<Framerate<usize>> for Framerate<f64> {
         Framerate(value.frames() as f64, value.seconds() as f64)
     }
 }
+
+impl From<gst::Fraction> for Framerate<usize> {
+    fn from(value: gst::Fraction) -> Self {
+        Framerate(*value.0.numer() as usize, *value.0.denom() as usize)
+    }
+}

@@ -1,12 +1,9 @@
 use futures::future::join_all;
 use futures::{stream, Stream, StreamExt};
-use glib::object::Cast;
-use gstreamer::prelude::GstBinExt;
-use gstreamer::Pipeline;
+use gst::Pipeline;
 use identity_iota::prelude::Resolver;
 use identity_iota::storage::JwkStorageDocumentError;
 use identity_iota::verification::jws::{JwsAlgorithm, VerificationInput};
-use image::GenericImageView;
 use std::collections::{HashMap, VecDeque};
 use std::future::Future;
 use std::path::Path;
@@ -20,7 +17,6 @@ use crate::{
     file::{SignedChunk, Timestamp},
     spec::Coord,
     time::ONE_SECOND_MILLIS,
-    video::frame_iter::ImageFns,
 };
 use crate::{CredentialStore, SignFile};
 
@@ -31,9 +27,7 @@ pub use super::sign::ChunkSigner;
 use super::verify::{SignatureState, VerifiedFrame};
 
 use super::{
-    frame_iter::{RgbFrame, VideoFrame, VideoFrameIter},
-    framerate::Framerate,
-    FrameInfo, SignPipelineBuilder, VideoError,
+    frame::Framerate, sample_iter::SampleIter, Frame, FrameInfo, SignPipelineBuilder, VideoError,
 };
 use super::{DelayedStream, KeyBound, KeyIdBound, SignerInfo};
 
@@ -70,12 +64,8 @@ impl SignPipeline {
     /// frame with the given [VideoFrame] type.
     ///
     /// Parts of this function was inspired by [`vid_frame_iter`](https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter)
-    pub fn try_into_iter<RF: VideoFrame>(self) -> Result<VideoFrameIter<RF>, VideoError> {
-        let pipeline = VideoFrameIter::<RF> {
-            pipeline: self.pipe,
-            fused: false,
-            _phantom: std::marker::PhantomData,
-        };
+    pub fn try_into_iter(self) -> Result<SampleIter, VideoError> {
+        let pipeline = SampleIter::new(self.pipe);
         pipeline.pause()?;
 
         if let Some(skip_amount) = self.start_offset {
@@ -92,28 +82,8 @@ impl SignPipeline {
     /// This does not consume the pipeline, instead opting to clone it
     ///
     /// Parts of this function was inspired by [`vid_frame_iter`](https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter)
-    pub fn try_iter<RF: VideoFrame>(&self) -> Result<VideoFrameIter<RF>, VideoError> {
-        let appsink = self
-            .pipe
-            .by_name("sink")
-            .expect("Sink element not found")
-            .downcast::<gstreamer_app::AppSink>()
-            .expect("Sink element is expected to be an appsink!");
-
-        // Tell the appsink what format we want.
-        // This can be set after linking the two objects, because format negotiation between
-        // both elements will happen during pre-rolling of the pipeline.
-        appsink.set_caps(Some(
-            &gstreamer::Caps::builder("video/x-raw")
-                .field("format", RF::gst_video_format().to_str())
-                .build(),
-        ));
-
-        let pipeline = VideoFrameIter::<RF> {
-            pipeline: self.pipe.clone(),
-            fused: false,
-            _phantom: std::marker::PhantomData,
-        };
+    pub fn try_iter(&self) -> Result<SampleIter, VideoError> {
+        let pipeline = SampleIter::new(self.pipe.clone());
         pipeline.pause()?;
 
         if let Some(skip_amount) = self.start_offset {
@@ -138,7 +108,7 @@ impl SignPipeline {
             .ok_or(VideoError::OutOfRange(start, at))
     }
 
-    fn frames_to_buffer<'a, I: Iterator<Item = &'a RgbFrame>>(
+    fn frames_to_buffer<'a, I: Iterator<Item = &'a Frame>>(
         buf_len: usize,
         start_idx: usize,
         size: Coord,
@@ -149,9 +119,7 @@ impl SignPipeline {
 
         for f in it {
             // TODO: Deal with the sign crop and stuff
-            frames_buf.extend_from_slice(
-                f.as_flat().as_slice(), //.ok_or(VideoError::OutOfRange((start, timestamp)))?,
-            );
+            frames_buf.extend_from_slice(f.raw_buffer());
         }
 
         frames_buf
@@ -161,7 +129,7 @@ impl SignPipeline {
     fn get_buffer_for(
         &self,
         size: Coord,
-        frame_buffer: &VecDeque<RgbFrame>,
+        frame_buffer: &VecDeque<Frame>,
         fps: Framerate<usize>,
         frame_idx: usize,
         excess: usize,
@@ -196,7 +164,7 @@ impl SignPipeline {
     {
         let fps = self.fps.unwrap_or_default();
 
-        let iter = self.try_iter::<RgbFrame>()?.enumerate();
+        let iter = self.try_iter()?.map(|r| r.map(Frame::from)).enumerate();
         let delayed = DelayedStream::<_, _>::new(MAX_CHUNK_LENGTH, stream::iter(iter));
 
         let state_cache: Arc<Mutex<HashMap<(Timestamp, &Vec<u8>), SignatureState>>> =
@@ -216,8 +184,8 @@ impl SignPipeline {
                 let credentials = credentials.clone();
                 let state_cache = state_cache.clone();
                 async move {
-                    let frame = match &frame.1 {
-                        Ok(f) => f.clone(), // TODO: Probs try and improve this
+                    let frame: Frame = match &frame.1 {
+                        Ok(f) => f.clone().into(),
                         Err(e) => return Err(e.clone().into()),
                     };
 
@@ -401,18 +369,18 @@ impl SignPipeline {
     where
         K: KeyBound + 'a + Sync,
         I: KeyIdBound + 'a + Sync,
-        F: FnMut(FrameInfo<'_>) -> ITER,
+        F: FnMut(FrameInfo) -> ITER,
         ITER: IntoIterator<Item = ChunkSigner<'a, K, I>>,
     {
         let fps = self.fps.unwrap_or_default();
         let buf_capacity = fps.convert_to_frames(MAX_CHUNK_LENGTH);
-        let mut frame_buffer: VecDeque<RgbFrame> = VecDeque::with_capacity(buf_capacity);
+        let mut frame_buffer: VecDeque<Frame> = VecDeque::with_capacity(buf_capacity);
 
         let mut futures: Vec<(Timestamp, _)> = vec![];
 
         // TODO: Somehow swap to iter/stream
         for (i, frame) in self.try_iter()?.enumerate() {
-            let frame: RgbFrame = frame?;
+            let frame: Frame = frame?.into();
             if frame_buffer.len() == buf_capacity {
                 frame_buffer.pop_front();
             }
@@ -420,7 +388,7 @@ impl SignPipeline {
 
             let (timestamp, excess_frames) = Timestamp::from_frames(i, fps, self.start_offset);
 
-            let sign_info = sign_with(FrameInfo::new(&frame, timestamp, i, fps));
+            let sign_info = sign_with(FrameInfo::new(frame.clone(), timestamp, i, fps));
 
             frame_buffer.push_back(frame);
             let mut chunks: HashMap<
@@ -494,7 +462,7 @@ mod tests {
 
     #[tokio::test]
     async fn sign_and_verify() -> Result<(), Box<dyn Error>> {
-        gstreamer::init()?;
+        gst::init()?;
 
         let client = get_client();
         let issuer = TestIssuer::new(client.clone()).await?;
