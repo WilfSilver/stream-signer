@@ -2,14 +2,14 @@
 
 use std::path::Path;
 
-use glib::object::ObjectExt;
-use gstreamer::{
+use glib::object::{Cast, ObjectExt};
+use gst::{
     element_factory::ElementBuilder,
-    prelude::{ElementExt, GstBinExtManual, PadExt},
-    Element, ElementFactory, Pipeline,
+    prelude::{ElementExt, ElementExtManual, GstBinExt, GstBinExtManual, PadExt},
+    Caps, Element, ElementFactory, Fraction, Pipeline,
 };
 
-use super::{SignPipeline, VideoError};
+use super::{Framerate, SignPipeline, VideoError};
 
 #[derive(Default)]
 pub enum FramerateOption {
@@ -151,20 +151,24 @@ impl<'a> SignPipelineBuilder<'a> {
     pub fn build(self) -> Result<SignPipeline, VideoError> {
         let start = self.start_offset;
         Ok(SignPipeline::new(
-            self.build_raw_pipeline()?,
+            self.build_raw_pipeline()?.0,
             start,
             None, // TODO: Autodetect framerate
         ))
     }
 
-    fn build_raw_pipeline(self) -> Result<Pipeline, VideoError> {
+    fn build_raw_pipeline(self) -> Result<(Pipeline, String), VideoError> {
         // Create the pipeline and add elements
         let src = self.src.build()?;
         let convert = self.convert.build()?;
-        let sink = self.sink.build()?;
+        let caps = gst::Caps::builder("video/x-raw")
+            .field("format", gst_video::VideoFormat::Rgb.to_string())
+            .build();
+        let sink = self.sink.property("caps", caps).build()?;
+        let sink_name = sink.property::<String>("name");
         let extras = self.extras?;
 
-        let pipeline = gstreamer::Pipeline::new();
+        let pipeline = gst::Pipeline::new();
         let chain = [&src]
             .into_iter()
             .chain(extras.iter())
@@ -175,15 +179,36 @@ impl<'a> SignPipelineBuilder<'a> {
         Element::link_many(chain.skip(1))?;
 
         // Connect the 'pad-added' signal to dynamically link the source to the converter
-        src.connect_pad_added(move |_, pad| {
+        let sn = sink_name.clone();
+        src.connect_pad_added(move |src, pad| {
             let first_pad = extras
                 .first()
                 .unwrap_or(&convert)
-                .static_pad(&sink.property::<String>("name"))
+                .static_pad(&sn)
                 .expect("Could not get expected sink");
             pad.link(&first_pad).expect("Could not link pad to appsink");
+
+            println!(
+                "Duration: {}",
+                src.query_duration::<gst::format::Time>()
+                    .unwrap()
+                    .to_string()
+            );
         });
 
-        Ok(pipeline)
+        // let appsink = pipeline
+        //     .by_name(&sink_name)
+        //     .expect("Sink element not found")
+        //     .downcast::<gst_app::AppSink>()
+        //     .expect("Sink element is expected to be an appsink!");
+
+        // Tell the appsink what format we want.
+        // This can be set after linking the two objects, because format negotiation between
+        // both elements will happen during pre-rolling of the pipeline.
+        // appsink.set_caps(Some(
+        //     &,
+        // ));
+
+        Ok((pipeline, sink_name))
     }
 }

@@ -20,11 +20,11 @@ use identity_iota::{
 use serde_json::json;
 use stream_signer::{
     file::Timestamp,
-    gstreamer,
+    gst,
     tests::{client::get_client, identity::TestIdentity, issuer::TestIssuer},
     video::{
-        ChunkSigner, FrameInfo, FramerateOption, GenericImageView, ImageFns, TimeRange,
-        MAX_CHUNK_LENGTH,
+        frame::{GenericImageView, ImageFns, TimeRange},
+        ChunkSigner, FrameInfo, FramerateOption, MAX_CHUNK_LENGTH,
     },
     SignFile, SignPipeline,
 };
@@ -69,16 +69,11 @@ pub struct Frame {
     pub buf: Box<[u8]>,
 }
 
-impl<'a> From<FrameInfo<'a>> for Frame {
-    fn from(value: FrameInfo<'a>) -> Self {
+impl From<FrameInfo> for Frame {
+    fn from(value: FrameInfo) -> Self {
         let (width, height) = value.frame.dimensions();
 
-        let buf = value
-            .frame
-            .as_flat()
-            .as_slice()
-            .to_owned()
-            .into_boxed_slice();
+        let buf = value.frame.raw_buffer().to_owned().into_boxed_slice();
 
         Frame {
             width: width as usize,
@@ -113,7 +108,7 @@ impl VideoWidget {
         sign_last_chunk: Arc<(AtomicBool, AtomicU32)>,
         options: VideoOptions,
     ) {
-        gstreamer::init().expect("Failed gstreamer");
+        gst::init().expect("Failed gstreamer");
 
         let client = get_client();
         let issuer = TestIssuer::new(client.clone())

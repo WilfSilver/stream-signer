@@ -7,7 +7,7 @@ pub use crate::credential::*;
 pub use crate::file::{time, SignFile};
 pub use video::SignPipeline;
 
-pub use gstreamer;
+pub use gst;
 
 #[cfg(any(test, feature = "testlibs"))]
 pub mod tests;

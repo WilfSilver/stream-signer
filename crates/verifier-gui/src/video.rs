@@ -4,7 +4,7 @@ use druid::{piet::CairoImage, Data, PaintCtx, Rect, RenderContext, Size, Widget}
 use futures::executor::block_on;
 use identity_iota::storage::{JwkMemStore, KeyIdMemstore};
 use stream_signer::{
-    gstreamer,
+    gst,
     video::{GenericImageView, ImageFns, RgbFrame},
     SignFile, SignPipeline,
 };
@@ -68,7 +68,7 @@ impl VideoWidget {
     }
 
     async fn watch_video(event_sink: Arc<druid::ExtEventSink>, options: VideoOptions) {
-        gstreamer::init().expect("Failed gstreamer");
+        gst::init().expect("Failed gstreamer");
 
         // let client = get_client();
         // let issuer = TestIssuer::new(client.clone()).await?;
