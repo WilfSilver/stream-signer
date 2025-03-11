@@ -16,7 +16,7 @@ use super::FrameInfo;
 #[derive(Debug, Clone)]
 pub struct UnverifiedSignature {
     pub error: Arc<SingleStructError<SignatureVerificationErrorKind>>,
-    pub signer: Signer,
+    pub signer: Box<Signer>,
 }
 
 #[derive(Debug, Error, Clone)]
@@ -32,7 +32,7 @@ pub enum SignatureState {
     Invalid(InvalidSignatureError),
     Unverified(UnverifiedSignature),
     Unresolved(Arc<ResolverError>),
-    Verified(Signer),
+    Verified(Box<Signer>),
 }
 
 impl SignatureState {
@@ -47,6 +47,7 @@ impl SignatureState {
             SignerState::Valid(s) => {
                 let verified = verifier.verify(input, &s.public_key);
                 match verified {
+                    // TODO: Potential to remove clone and use lifetime
                     Ok(()) => Self::Verified(s.clone()),
                     Err(e) => Self::Unverified(UnverifiedSignature {
                         error: e.into(),

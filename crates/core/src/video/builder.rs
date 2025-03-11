@@ -27,9 +27,9 @@ pub struct SignPipelineBuilder<'a> {
     start_offset: Option<f64>,
 }
 
-impl<'a> SignPipelineBuilder<'a> {
+impl SignPipelineBuilder<'_> {
     pub fn from_path<P: AsRef<Path>>(path: &P) -> Option<Self> {
-        Some(Self::from_uri(&format!(
+        Some(Self::from_uri(format!(
             "file://{}",
             path.as_ref().to_str()?
         )))
@@ -76,13 +76,10 @@ impl<'a> SignPipelineBuilder<'a> {
     }
 
     pub fn with_extra(mut self, extra: Result<Element, glib::BoolError>) -> Self {
-        match &mut self.extras {
-            Ok(extras) => match extra {
-                Ok(value) => extras.push(value),
-                Err(e) => self.extras = Err(e),
-            },
-            _ => {}
-        }
+        if let Ok(extras) = &mut self.extras { match extra {
+            Ok(value) => extras.push(value),
+            Err(e) => self.extras = Err(e),
+        } }
         self
     }
 
@@ -90,15 +87,12 @@ impl<'a> SignPipelineBuilder<'a> {
     where
         I: IntoIterator<Item = Element>,
     {
-        match &mut self.extras {
-            Ok(old_extras) => match extras {
-                Ok(values) => old_extras.extend(values),
-                Err(e) => {
-                    self.extras = Err(e);
-                }
-            },
-            _ => {}
-        }
+        if let Ok(old_extras) = &mut self.extras { match extras {
+            Ok(values) => old_extras.extend(values),
+            Err(e) => {
+                self.extras = Err(e);
+            }
+        } }
         self
     }
 
@@ -106,19 +100,16 @@ impl<'a> SignPipelineBuilder<'a> {
     where
         I: IntoIterator<Item = Result<Element, glib::BoolError>>,
     {
-        match &mut self.extras {
-            Ok(old_extras) => {
-                for e in extras {
-                    match e {
-                        Ok(value) => old_extras.push(value),
-                        Err(e) => {
-                            self.extras = Err(e);
-                            break;
-                        }
+        if let Ok(old_extras) = &mut self.extras {
+            for e in extras {
+                match e {
+                    Ok(value) => old_extras.push(value),
+                    Err(e) => {
+                        self.extras = Err(e);
+                        break;
                     }
                 }
             }
-            _ => {}
         }
         self
     }
@@ -168,7 +159,7 @@ impl<'a> SignPipelineBuilder<'a> {
         let chain = [&src]
             .into_iter()
             .chain(extras.iter())
-            .chain([&convert, &sink].into_iter());
+            .chain([&convert, &sink]);
 
         pipeline.add_many(chain.clone())?;
         // We dynamically link the source later on
@@ -188,7 +179,6 @@ impl<'a> SignPipelineBuilder<'a> {
                 "Duration: {}",
                 src.query_duration::<gst::format::Time>()
                     .unwrap()
-                    .to_string()
             );
         });
 

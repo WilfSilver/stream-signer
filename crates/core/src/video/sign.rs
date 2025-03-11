@@ -28,7 +28,7 @@ where
     pub fragment: &'a str,
 }
 
-impl<'a, K, I> SignerInfo<'a, K, I>
+impl<K, I> SignerInfo<'_, K, I>
 where
     K: KeyBound,
     I: KeyIdBound,
