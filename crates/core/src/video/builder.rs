@@ -76,10 +76,12 @@ impl SignPipelineBuilder<'_> {
     }
 
     pub fn with_extra(mut self, extra: Result<Element, glib::BoolError>) -> Self {
-        if let Ok(extras) = &mut self.extras { match extra {
-            Ok(value) => extras.push(value),
-            Err(e) => self.extras = Err(e),
-        } }
+        if let Ok(extras) = &mut self.extras {
+            match extra {
+                Ok(value) => extras.push(value),
+                Err(e) => self.extras = Err(e),
+            }
+        }
         self
     }
 
@@ -87,12 +89,14 @@ impl SignPipelineBuilder<'_> {
     where
         I: IntoIterator<Item = Element>,
     {
-        if let Ok(old_extras) = &mut self.extras { match extras {
-            Ok(values) => old_extras.extend(values),
-            Err(e) => {
-                self.extras = Err(e);
+        if let Ok(old_extras) = &mut self.extras {
+            match extras {
+                Ok(values) => old_extras.extend(values),
+                Err(e) => {
+                    self.extras = Err(e);
+                }
             }
-        } }
+        }
         self
     }
 
@@ -177,8 +181,7 @@ impl SignPipelineBuilder<'_> {
 
             println!(
                 "Duration: {}",
-                src.query_duration::<gst::format::Time>()
-                    .unwrap()
+                src.query_duration::<gst::format::Time>().unwrap()
             );
         });
 

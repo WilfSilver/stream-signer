@@ -12,13 +12,15 @@ where
 
 impl<T: Clone + Data> VideoState<T> {
     pub fn get_curr_image(&self, ctx: &mut PaintCtx<'_, '_, '_>) -> Option<CairoImage> {
-        self.curr_frame.as_ref().map(|info| ctx.make_image(
-                    info.frame.width() as usize,
-                    info.frame.height() as usize,
-                    info.frame.raw_buffer(),
-                    druid::piet::ImageFormat::Rgb,
-                )
-                .expect("Could not create buffer"))
+        self.curr_frame.as_ref().map(|info| {
+            ctx.make_image(
+                info.frame.width() as usize,
+                info.frame.height() as usize,
+                info.frame.raw_buffer(),
+                druid::piet::ImageFormat::Rgb,
+            )
+            .expect("Could not create buffer")
+        })
     }
 
     pub fn update_frame(&mut self, frame: FrameInfo) {
