@@ -116,13 +116,13 @@ mod verifying {
 
     impl SignPipeline {
         // TODO: Swap to iterator
-        pub fn verify<'a>(
+        pub fn verify(
             self,
             resolver: Resolver,
-            signfile: &'a SignFile,
+            signfile: &SignFile,
             // TODO: Change to FrameError (separating VideoError + FrameError)
         ) -> Result<
-            impl Stream<Item = Result<Pin<Box<VerifiedFrame>>, VideoError>> + use<'a>,
+            impl Stream<Item = Result<Pin<Box<VerifiedFrame>>, VideoError>> + use<'_>,
             VideoError,
         > {
             let start_offset = self.start_offset;
@@ -400,7 +400,7 @@ mod signing {
 
             // TODO: Somehow swap to iter/stream
             for (i, frame) in iter {
-                let frame: Frame = frame?.into();
+                let frame: Frame = frame?;
                 let fps = frame.fps();
 
                 if frame_buffer.len() == buf_capacity {
