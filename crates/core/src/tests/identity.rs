@@ -18,9 +18,9 @@ use super::{
 };
 
 pub struct TestIdentity {
-    manager: SecretManager,
+    _manager: SecretManager,
     storage: MemStorage,
-    credential: Credential,
+    _credential: Credential,
     jwt: Jwt,
     pub document: CoreDocument,
     pub fragment: String,
@@ -49,8 +49,8 @@ impl TestIdentity {
         let jwt = issuer.create_credential_jwt(&credential).await?;
 
         Ok(Self {
-            credential,
-            manager,
+            _credential: credential,
+            _manager: manager,
             storage,
             document,
             fragment,

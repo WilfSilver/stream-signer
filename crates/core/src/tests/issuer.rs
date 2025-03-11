@@ -16,7 +16,7 @@ pub type MemStorage = Storage<JwkMemStore, KeyIdMemstore>;
 
 pub struct TestIssuer {
     client: Arc<Mutex<MemClient>>,
-    manager: SecretManager,
+    _manager: SecretManager,
     storage: MemStorage,
     pub document: CoreDocument,
     pub fragment: String,
@@ -35,7 +35,7 @@ impl TestIssuer {
 
         let issuer = Self {
             client,
-            manager,
+            _manager: manager,
             storage,
             document,
             fragment,
