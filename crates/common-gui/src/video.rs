@@ -32,7 +32,7 @@ impl<C: VideoPlayer<T>, T: Clone + Data> VideoWidget<C, T> {
     pub fn new(inner: C) -> Self {
         VideoWidget {
             inner,
-            _phantom: PhantomData::default(),
+            _phantom: PhantomData,
         }
     }
 }
@@ -86,15 +86,12 @@ impl<C: VideoPlayer<VideoState<T>>, T: Clone + Data> Widget<VideoState<T>>
         data: &VideoState<T>,
         env: &druid::Env,
     ) {
-        match event {
-            LifeCycle::WidgetAdded => {
-                // Sneakily use this to gain focus
-                ctx.request_anim_frame();
+        if let LifeCycle::WidgetAdded = event {
+            // Sneakily use this to gain focus
+            ctx.request_anim_frame();
 
-                let event_sink = ctx.get_external_handle();
-                self.inner.spawn_player(event_sink, data.clone());
-            }
-            _ => {}
+            let event_sink = ctx.get_external_handle();
+            self.inner.spawn_player(event_sink, data.clone());
         }
         self.inner.lifecycle(ctx, event, data, env);
     }
