@@ -1,3 +1,4 @@
+use common_gui::state::VideoState;
 use druid::{
     widget::{Button, Flex, TextBox},
     FileDialogOptions, FileSpec, Widget, WidgetExt,
@@ -5,7 +6,7 @@ use druid::{
 
 use crate::{
     state::{AppData, View},
-    video::{VideoData, VideoOptions},
+    video::VideoOptions,
 };
 
 pub fn make_menu_ui() -> impl Widget<AppData> {
@@ -37,7 +38,7 @@ fn make_signfile_picker() -> impl Widget<AppData> {
         .with_flex_child(
             TextBox::new()
                 .lens(VideoOptions::output)
-                .lens(VideoData::options)
+                .lens(VideoState::options)
                 .lens(AppData::video)
                 .fix_width(500.),
             1.0,
@@ -70,7 +71,7 @@ fn make_video_picker() -> impl Widget<AppData> {
         .with_flex_child(
             TextBox::new()
                 .lens(VideoOptions::src)
-                .lens(VideoData::options)
+                .lens(VideoState::options)
                 .lens(AppData::video)
                 .fix_width(500.),
             1.0,

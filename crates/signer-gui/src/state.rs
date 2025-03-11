@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
+use common_gui::state::VideoState;
 use druid::{
     commands, AppDelegate, Command, Data, DelegateCtx, Env, ExtEventSink, Handled, Lens, Target,
 };
 
-use crate::video::VideoData;
+use crate::video::VideoOptions;
 
 #[derive(Clone, Copy, Default, Data, PartialEq)]
 pub enum View {
@@ -16,7 +17,7 @@ pub enum View {
 #[derive(Clone, Data, Lens)]
 pub struct AppData {
     pub view: View,
-    pub video: VideoData,
+    pub video: VideoState<VideoOptions>,
     pub event_sink: Arc<ExtEventSink>,
 }
 
@@ -24,7 +25,7 @@ impl AppData {
     pub fn new(event_sink: ExtEventSink) -> Self {
         Self {
             view: View::default(),
-            video: VideoData::default(),
+            video: VideoState::default(),
             event_sink: Arc::new(event_sink),
         }
     }
