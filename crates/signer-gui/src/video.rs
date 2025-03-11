@@ -142,14 +142,11 @@ impl Widget<State> for SignPlayer {
         _data: &mut State,
         _env: &druid::Env,
     ) {
-        match event {
-            Event::KeyDown(id) => {
-                if id.code == Code::Space {
-                    self.sign_info.0.store(true, Ordering::Relaxed);
-                    ctx.set_handled();
-                }
+        if let Event::KeyDown(id) = event {
+            if id.code == Code::Space {
+                self.sign_info.0.store(true, Ordering::Relaxed);
+                ctx.set_handled();
             }
-            _ => {}
         }
     }
 
