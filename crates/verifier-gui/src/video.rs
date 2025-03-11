@@ -5,15 +5,11 @@ use druid::{Data, Event, Lens, LifeCycle, LifeCycleCtx, Widget};
 use futures::{executor::block_on, StreamExt};
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use serde_json::json;
-use stream_signer::{
-    gst,
-    tests::{
-        client::{get_client, get_resolver},
-        identity::TestIdentity,
-        issuer::TestIssuer,
-    },
-    video::FramerateOption,
-    SignFile, SignPipeline,
+use stream_signer::{gst, video::FramerateOption, SignFile, SignPipeline};
+use testlibs::{
+    client::{get_client, get_resolver},
+    identity::TestIdentity,
+    issuer::TestIssuer,
 };
 
 use crate::state::AppData;
