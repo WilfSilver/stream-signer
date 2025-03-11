@@ -117,7 +117,7 @@ mod verifying {
     impl SignPipeline {
         // TODO: Swap to iterator
         pub fn verify<'a>(
-            &'a self,
+            self,
             resolver: Resolver,
             signfile: &'a SignFile,
             // TODO: Change to FrameError (separating VideoError + FrameError)
@@ -125,8 +125,9 @@ mod verifying {
             impl Stream<Item = Result<Pin<Box<VerifiedFrame>>, VideoError>> + use<'a>,
             VideoError,
         > {
+            let start_offset = self.start_offset;
             let mut iter = self
-                .try_iter()?
+                .try_into_iter()?
                 .map(|r| r.map(Frame::from))
                 .enumerate()
                 .peekable();
@@ -168,8 +169,7 @@ mod verifying {
 
                         let size = Coord::new(frame.width(), frame.height());
 
-                        let (timestamp, _) =
-                            Timestamp::from_frames(i, frame.fps(), self.start_offset);
+                        let (timestamp, _) = Timestamp::from_frames(i, frame.fps(), start_offset);
 
                         let buf_ref = &buffer;
                         let fps = frame.fps();
@@ -197,8 +197,8 @@ mod verifying {
                                             let start_frame = 0;
 
                                             // TODO: Check if the end frame is after 10 second mark
-                                            let end_frame = end.into_frames(fps, self.start_offset)
-                                                - start.into_frames(fps, self.start_offset);
+                                            let end_frame = end.into_frames(fps, start_offset)
+                                                - start.into_frames(fps, start_offset);
 
                                             let frames_buf = Self::frames_to_buffer(
                                                 buf_ref.len(),
@@ -312,7 +312,7 @@ mod signing {
         /// # sign_file.write("./my_signatures.srt");
         /// ```
         pub async fn sign_chunks<'a, T: Into<Timestamp>, K, I>(
-            &self,
+            self,
             length: T,
             signer: &'a SignerInfo<'a, K, I>,
         ) -> Result<impl Iterator<Item = SignedChunk> + 'a, VideoError>
@@ -368,7 +368,7 @@ mod signing {
         /// # sign_file.write("./my_signatures.srt")
         /// ```
         pub async fn sign<'a, K, I, F, ITER>(
-            &self,
+            self,
             mut sign_with: F,
         ) -> Result<impl Iterator<Item = SignedChunk> + 'a, VideoError>
         where
@@ -377,8 +377,10 @@ mod signing {
             F: FnMut(FrameInfo) -> ITER,
             ITER: IntoIterator<Item = ChunkSigner<'a, K, I>>,
         {
+            let start_offset = self.start_offset;
+
             let mut iter = self
-                .try_iter()?
+                .try_into_iter()?
                 .map(|s| s.map(Frame::from))
                 .enumerate()
                 .peekable();
@@ -397,7 +399,7 @@ mod signing {
             let mut futures: Vec<(Timestamp, _)> = vec![];
 
             // TODO: Somehow swap to iter/stream
-            for (i, frame) in self.try_iter()?.enumerate() {
+            for (i, frame) in iter {
                 let frame: Frame = frame?.into();
                 let fps = frame.fps();
 
@@ -406,7 +408,7 @@ mod signing {
                 }
                 let size = Coord::new(frame.width(), frame.height());
 
-                let (timestamp, excess_frames) = Timestamp::from_frames(i, fps, self.start_offset);
+                let (timestamp, excess_frames) = Timestamp::from_frames(i, fps, start_offset);
 
                 let sign_info = sign_with(FrameInfo::new(frame.clone(), timestamp, i, fps));
 
@@ -420,7 +422,8 @@ mod signing {
                     // TODO: Add protections if the timeframe is too short
                     let start = si.start;
 
-                    let start_idx = self.get_start_frame(
+                    let start_idx = get_start_frame(
+                        start_offset,
                         frame_buffer.len(),
                         fps,
                         excess_frames,
@@ -474,20 +477,19 @@ mod signing {
 
             Ok(res.into_iter())
         }
-
-        pub fn get_start_frame(
-            &self,
-            buf_len: usize,
-            fps: Framerate<usize>,
-            excess: usize,
-            start: Timestamp,
-            at: Timestamp,
-            i: usize,
-        ) -> Result<usize, VideoError> {
-            buf_len
-                .checked_sub(i - excess - start.into_frames(fps, self.start_offset))
-                .ok_or(VideoError::OutOfRange(start, at))
-        }
+    }
+    fn get_start_frame(
+        start_offset: Option<f64>,
+        buf_len: usize,
+        fps: Framerate<usize>,
+        excess: usize,
+        start: Timestamp,
+        at: Timestamp,
+        i: usize,
+    ) -> Result<usize, VideoError> {
+        buf_len
+            .checked_sub(i - excess - start.into_frames(fps, start_offset))
+            .ok_or(VideoError::OutOfRange(start, at))
     }
 }
 
