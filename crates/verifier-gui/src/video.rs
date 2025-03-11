@@ -1,182 +1,132 @@
-use std::{sync::Arc, thread};
+use std::thread;
 
-use druid::{piet::CairoImage, Data, PaintCtx, Rect, RenderContext, Size, Widget};
-use futures::executor::block_on;
-use identity_iota::storage::{JwkMemStore, KeyIdMemstore};
+use common_gui::video::VideoPlayer;
+use druid::{Data, Event, Lens, LifeCycle, LifeCycleCtx, Widget};
+use futures::{executor::block_on, StreamExt};
+use identity_iota::{core::FromJson, credential::Subject, did::DID};
+use serde_json::json;
 use stream_signer::{
     gst,
-    video::{GenericImageView, ImageFns, RgbFrame},
+    tests::{
+        client::{get_client, get_resolver},
+        identity::TestIdentity,
+        issuer::TestIssuer,
+    },
+    video::FramerateOption,
     SignFile, SignPipeline,
 };
 
-use crate::state::{AppData, VideoOptions, View};
+use crate::state::AppData;
 
-pub trait StateWithFrame: Data {
-    fn get_curr_frame(&self) -> &Option<Frame>;
-
-    fn get_curr_image(&self, ctx: &mut PaintCtx<'_, '_, '_>) -> Option<CairoImage> {
-        match self.get_curr_frame() {
-            Some(frame) => Some(
-                ctx.make_image(
-                    frame.width,
-                    frame.height,
-                    &frame.buf,
-                    druid::piet::ImageFormat::Rgb,
-                )
-                .expect("Could not create buffer"),
-            ),
-            None => None,
-        }
-    }
+#[derive(Clone, Data, Default, Lens)]
+pub struct VideoOptions {
+    pub src: String,
+    pub signfile: String,
 }
 
-// TODO: Add index to make it easier for PartialEq
-#[derive(Clone, PartialEq)]
-pub struct Frame {
-    pub width: usize,
-    pub height: usize,
-    pub buf: Box<[u8]>,
-}
+pub struct VerifyPlayer {}
 
-impl From<&RgbFrame> for Frame {
-    fn from(value: &RgbFrame) -> Self {
-        let (width, height) = value.dimensions();
-
-        let buf = value.as_flat().as_slice().to_owned().into_boxed_slice();
-
-        Frame {
-            width: width as usize,
-            height: height as usize,
-            buf,
-        }
-    }
-}
-
-impl Data for Frame {
-    fn same(&self, other: &Self) -> bool {
-        self == other
-    }
-}
-
-#[derive(Default)]
-pub struct VideoWidget {}
-
-impl VideoWidget {
-    pub fn new(event_sink: Arc<druid::ExtEventSink>, options: VideoOptions) -> Self {
+impl VideoPlayer<VideoOptions> for VerifyPlayer {
+    fn spawn_player(&self, event_sink: druid::ExtEventSink, options: VideoOptions) {
         thread::spawn(move || block_on(Self::watch_video(event_sink, options)));
-        VideoWidget::default()
+    }
+}
+
+impl VerifyPlayer {
+    pub fn new() -> Self {
+        VerifyPlayer {}
     }
 
-    async fn watch_video(event_sink: Arc<druid::ExtEventSink>, options: VideoOptions) {
+    async fn watch_video(event_sink: druid::ExtEventSink, options: VideoOptions) {
         gst::init().expect("Failed gstreamer");
 
-        // let client = get_client();
-        // let issuer = TestIssuer::new(client.clone()).await?;
-        // let resolver = get_resolver(client);
+        let client = get_client();
+        let issuer = TestIssuer::new(client.clone())
+            .await
+            .expect("Failed to create issuer");
 
-        // let identity = TestIdentity::new(&issuer, |id| {
-        //     Subject::from_json_value(json!({
-        //       "id": id.as_str(),
-        //       "name": "Alice",
-        //       "degree": {
-        //         "type": "BachelorDegree",
-        //         "name": "Bachelor of Science and Arts",
-        //       },
-        //       "GPA": "4.0",
-        //     }))
-        //     .expect("Invalid subject")
-        // })
-        // .await?;
+        // We have to still create the identities
+        let _identity = TestIdentity::new(&issuer, |id| {
+            Subject::from_json_value(json!({
+              "id": id.as_str(),
+              "name": "Alice",
+              "degree": {
+                "type": "BachelorDegree",
+                "name": "Bachelor of Science and Arts",
+              },
+              "GPA": "4.0",
+            }))
+            .expect("Invalid subject")
+        })
+        .await
+        .expect("Failed to create identity");
 
-        let pipe = SignPipeline::build_from_path(&options.url)
+        let resolver = get_resolver(client);
+
+        let pipe = SignPipeline::build_from_path(&options.src)
             .expect("Invalid path given")
+            .with_frame_rate(FramerateOption::Auto)
             .build()
             .expect("Failed to build pipeline");
 
-        let _ = pipe
-            .sign::<JwkMemStore, KeyIdMemstore, _, _>(|info| {
-                let frame: Frame = info.frame.into();
+        let signfile = SignFile::from_file(options.signfile).expect("Failed to read signfile");
 
-                event_sink.add_idle_callback(move |data: &mut AppData| {
-                    data.video.curr_frame = Some(frame);
-                });
+        let iter = pipe
+            .verify(resolver, &signfile)
+            .expect("Failed to start verifying");
 
-                return vec![].into_iter();
-            })
-            .await
-            .expect("Failed to sign pipeline")
-            .collect::<SignFile>();
+        iter.for_each(|frame| async {
+            let Ok(info) = frame else {
+                return;
+            };
 
-        // TODO: Have a button to return to the main menu
-        event_sink.add_idle_callback(move |data: &mut AppData| {
-            data.view = View::MainMenu;
-        });
+            let frame = info.info.clone();
+
+            event_sink.add_idle_callback(move |data: &mut AppData| {
+                data.video.curr_frame = Some(frame);
+            });
+        })
+        .await;
     }
 }
 
-impl<S: StateWithFrame> Widget<S> for VideoWidget {
+impl Widget<VideoOptions> for VerifyPlayer {
     fn event(
         &mut self,
         _ctx: &mut druid::EventCtx,
-        _event: &druid::Event,
-        _data: &mut S,
+        _event: &Event,
+        _data: &mut VideoOptions,
         _env: &druid::Env,
     ) {
     }
 
-    fn update(&mut self, ctx: &mut druid::UpdateCtx, old_data: &S, data: &S, _env: &druid::Env) {
-        if !old_data.same(data) {
-            ctx.request_paint();
-        }
+    fn update(
+        &mut self,
+        _ctx: &mut druid::UpdateCtx,
+        _old_data: &VideoOptions,
+        _data: &VideoOptions,
+        _env: &druid::Env,
+    ) {
     }
 
     fn layout(
         &mut self,
         _ctx: &mut druid::LayoutCtx,
         bc: &druid::BoxConstraints,
-        _data: &S,
+        _data: &VideoOptions,
         _env: &druid::Env,
     ) -> druid::Size {
         bc.max()
-        // bc.constrain(
-        //     data.get_curr_frame()
-        //         .as_ref()
-        //         .map(|f| (f.width as f64, f.height as f64))
-        //         .unwrap_or((100., 100.)),
-        // )
     }
 
     fn lifecycle(
         &mut self,
-        _ctx: &mut druid::LifeCycleCtx,
-        _event: &druid::LifeCycle,
-        _data: &S,
+        _ctx: &mut LifeCycleCtx,
+        _event: &LifeCycle,
+        _data: &VideoOptions,
         _env: &druid::Env,
     ) {
     }
 
-    fn paint(&mut self, ctx: &mut druid::PaintCtx, data: &S, _env: &druid::Env) {
-        if let Some(image) = data.get_curr_image(ctx) {
-            let frame = data.get_curr_frame().as_ref().unwrap();
-            let f_width = frame.width as f64;
-            let f_height = frame.height as f64;
-
-            let size = ctx.size();
-            let s_width = size.width;
-            let s_height = size.height;
-
-            let h_scale = s_height / f_height;
-            let w_scale = s_width / f_width;
-
-            // We want to scale towards the smallest size, leaving black bars
-            // everywhere else
-            let scaler = w_scale.min(h_scale);
-            let size = Size::new(f_width * scaler, f_height * scaler);
-            // Center black bars
-            let (x, y) = ((s_width - size.width) / 2., (s_height - size.height) / 2.);
-            let rect = Rect::new(x, y, x + size.width, y + size.height);
-
-            ctx.draw_image(&image, rect, druid::piet::InterpolationMode::Bilinear);
-        }
-    }
+    fn paint(&mut self, _ctx: &mut druid::PaintCtx, _data: &VideoOptions, _env: &druid::Env) {}
 }

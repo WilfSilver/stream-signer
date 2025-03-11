@@ -21,15 +21,15 @@ use crate::{
 use crate::{CredentialStore, SignFile};
 
 #[cfg(feature = "signing")]
-pub use super::sign::ChunkSigner;
+pub use super::{sign::ChunkSigner, KeyBound, KeyIdBound, SignerInfo};
 
 #[cfg(feature = "verifying")]
 use super::verify::{SignatureState, VerifiedFrame};
 
+use super::DelayedStream;
 use super::{
     frame::Framerate, sample_iter::SampleIter, Frame, FrameInfo, SignPipelineBuilder, VideoError,
 };
-use super::{DelayedStream, KeyBound, KeyIdBound, SignerInfo};
 
 pub const MAX_CHUNK_LENGTH: usize = 10 * ONE_SECOND_MILLIS as usize;
 
@@ -286,7 +286,10 @@ impl SignPipeline {
                         .await;
 
                     match signatures {
-                        Ok(sigs) => Ok(Box::pin(VerifiedFrame { frame, sigs })),
+                        Ok(sigs) => Ok(Box::pin(VerifiedFrame {
+                            info: FrameInfo::new(frame, timestamp, i, fps),
+                            sigs,
+                        })),
                         Err(e) => Err(e),
                     }
                 }

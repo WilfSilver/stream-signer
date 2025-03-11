@@ -7,7 +7,7 @@ use druid::{AppLauncher, WindowDesc};
 use state::{AppData, Delegate};
 
 pub fn main() {
-    let window = WindowDesc::new(app::make_ui()).title("External Event Demo");
+    let window = WindowDesc::new(app::make_ui()).title("Video Signature Verifier");
 
     let launcher = AppLauncher::with_window(window);
 

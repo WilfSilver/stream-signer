@@ -6,10 +6,8 @@ use std::{
     thread,
 };
 
-use druid::{
-    piet::CairoImage, Code, Color, Data, Event, Lens, LifeCycle, LifeCycleCtx, PaintCtx, Rect,
-    RenderContext, Size, Widget,
-};
+use common_gui::{state::VideoState, video::VideoPlayer};
+use druid::{Code, Color, Data, Event, Lens, LifeCycle, LifeCycleCtx, RenderContext, Widget};
 use futures::executor::block_on;
 use identity_iota::{
     core::FromJson,
@@ -22,10 +20,7 @@ use stream_signer::{
     file::Timestamp,
     gst,
     tests::{client::get_client, identity::TestIdentity, issuer::TestIssuer},
-    video::{
-        frame::{GenericImageView, ImageFns, TimeRange},
-        ChunkSigner, FrameInfo, FramerateOption, MAX_CHUNK_LENGTH,
-    },
+    video::{ChunkSigner, FramerateOption, MAX_CHUNK_LENGTH},
     SignFile, SignPipeline,
 };
 
@@ -37,68 +32,15 @@ pub struct VideoOptions {
     pub output: String,
 }
 
-#[derive(Clone, Data, Default, Lens)]
-pub struct VideoData {
-    pub curr_frame: Option<Frame>,
-    pub options: VideoOptions,
-}
-
-impl VideoData {
-    pub fn get_curr_image(&self, ctx: &mut PaintCtx<'_, '_, '_>) -> Option<CairoImage> {
-        match &self.curr_frame {
-            Some(frame) => Some(
-                ctx.make_image(
-                    frame.width,
-                    frame.height,
-                    &frame.buf,
-                    druid::piet::ImageFormat::Rgb,
-                )
-                .expect("Could not create buffer"),
-            ),
-            None => None,
-        }
-    }
-}
-
-// TODO: Add index to make it easier for PartialEq
-#[derive(Clone, PartialEq)]
-pub struct Frame {
-    pub width: usize,
-    pub height: usize,
-    pub time: TimeRange,
-    pub buf: Box<[u8]>,
-}
-
-impl From<FrameInfo> for Frame {
-    fn from(value: FrameInfo) -> Self {
-        let (width, height) = value.frame.dimensions();
-
-        let buf = value.frame.raw_buffer().to_owned().into_boxed_slice();
-
-        Frame {
-            width: width as usize,
-            height: height as usize,
-            time: value.time,
-            buf,
-        }
-    }
-}
-
-impl Data for Frame {
-    fn same(&self, other: &Self) -> bool {
-        self == other
-    }
-}
-
-pub struct VideoWidget {
+pub struct SignPlayer {
     sign_info: Arc<(AtomicBool, AtomicU32)>,
 }
 
-impl VideoWidget {
+impl SignPlayer {
     pub fn new() -> Self {
         let sign_last_chunk = Arc::new((AtomicBool::new(false), AtomicU32::new(0)));
 
-        VideoWidget {
+        SignPlayer {
             sign_info: sign_last_chunk,
         }
     }
@@ -148,10 +90,8 @@ impl VideoWidget {
             .sign::<JwkMemStore, KeyIdMemstore, _, _>(|info| {
                 let time = info.time;
 
-                let frame: Frame = info.into();
-
                 event_sink.add_idle_callback(move |data: &mut AppData| {
-                    data.video.curr_frame = Some(frame);
+                    data.video.update_frame(info);
                 });
 
                 // We want to sign when requested, or if the next frame is going to be past the
@@ -185,12 +125,21 @@ impl VideoWidget {
     }
 }
 
-impl Widget<VideoData> for VideoWidget {
+type State = VideoState<VideoOptions>;
+
+impl VideoPlayer<State> for SignPlayer {
+    fn spawn_player(&self, event_sink: druid::ExtEventSink, state: State) {
+        let sign_info = self.sign_info.clone();
+        thread::spawn(move || block_on(Self::watch_video(event_sink, sign_info, state.options)));
+    }
+}
+
+impl Widget<State> for SignPlayer {
     fn event(
         &mut self,
         ctx: &mut druid::EventCtx,
         event: &Event,
-        _data: &mut VideoData,
+        _data: &mut State,
         _env: &druid::Env,
     ) {
         match event {
@@ -200,29 +149,24 @@ impl Widget<VideoData> for VideoWidget {
                     ctx.set_handled();
                 }
             }
-            // We use animation frame to get focus on start
-            Event::AnimFrame(_) => ctx.request_focus(),
             _ => {}
         }
     }
 
     fn update(
         &mut self,
-        ctx: &mut druid::UpdateCtx,
-        old_data: &VideoData,
-        data: &VideoData,
+        _ctx: &mut druid::UpdateCtx,
+        _old_data: &State,
+        _data: &State,
         _env: &druid::Env,
     ) {
-        if !old_data.same(data) {
-            ctx.request_paint();
-        }
     }
 
     fn layout(
         &mut self,
         _ctx: &mut druid::LayoutCtx,
         bc: &druid::BoxConstraints,
-        _data: &VideoData,
+        _data: &State,
         _env: &druid::Env,
     ) -> druid::Size {
         bc.max()
@@ -230,59 +174,28 @@ impl Widget<VideoData> for VideoWidget {
 
     fn lifecycle(
         &mut self,
-        ctx: &mut LifeCycleCtx,
-        event: &LifeCycle,
-        data: &VideoData,
+        _ctx: &mut LifeCycleCtx,
+        _event: &LifeCycle,
+        _data: &State,
         _env: &druid::Env,
     ) {
-        match event {
-            LifeCycle::WidgetAdded => {
-                // Sneakily use this to gain focus
-                ctx.request_anim_frame();
-
-                let event_sink = ctx.get_external_handle();
-                let sign_info = self.sign_info.clone();
-                let options = data.options.clone();
-                thread::spawn(move || block_on(Self::watch_video(event_sink, sign_info, options)));
-            }
-            _ => {}
-        }
     }
 
-    fn paint(&mut self, ctx: &mut druid::PaintCtx, data: &VideoData, _env: &druid::Env) {
-        if let Some(image) = data.get_curr_image(ctx) {
-            let frame = data.curr_frame.as_ref().unwrap();
-            let f_width = frame.width as f64;
-            let f_height = frame.height as f64;
+    fn paint(&mut self, ctx: &mut druid::PaintCtx, data: &State, _env: &druid::Env) {
+        let Some(info) = &data.curr_frame else {
+            return;
+        };
 
-            let size = ctx.size();
-            let s_width = size.width;
-            let s_height = size.height;
-
-            let h_scale = s_height / f_height;
-            let w_scale = s_width / f_width;
-
-            // We want to scale towards the smallest size, leaving black bars
-            // everywhere else
-            let scaler = w_scale.min(h_scale);
-            let size = Size::new(f_width * scaler, f_height * scaler);
-            // Center black bars
-            let (x, y) = ((s_width - size.width) / 2., (s_height - size.height) / 2.);
-            let rect = Rect::new(x, y, x + size.width, y + size.height);
-
-            ctx.draw_image(&image, rect, druid::piet::InterpolationMode::Bilinear);
-
-            let sign_border_length = 500;
-            let time_since_last_sign =
-                frame.time.start() - self.sign_info.1.load(Ordering::Relaxed);
-            if time_since_last_sign < sign_border_length.into() {
-                let sbl = sign_border_length as f64;
-                ctx.stroke(
-                    rect,
-                    &Color::rgba(1., 0., 0., (sbl - *time_since_last_sign as f64) / sbl),
-                    50.,
-                );
-            }
+        let sign_border_length = 500;
+        let time_since_last_sign = info.time.start() - self.sign_info.1.load(Ordering::Relaxed);
+        if time_since_last_sign < sign_border_length.into() {
+            let sbl = sign_border_length as f64;
+            let rect = ctx.size().to_rect();
+            ctx.stroke(
+                rect,
+                &Color::rgba(1., 0., 0., (sbl - *time_since_last_sign as f64) / sbl),
+                50.,
+            );
         }
     }
 }

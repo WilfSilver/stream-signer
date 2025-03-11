@@ -125,7 +125,7 @@ impl Rem<Timestamp> for TimeRange {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FrameInfo {
     /// Stores the frame itself, it is okay to clone the frame due to the fact
     /// [Frame::clone] does not clone the underlying object
