@@ -40,7 +40,7 @@ impl TestIdentity {
 
         let subject = gen_subject(document.id());
         let credential: Credential = CredentialBuilder::default()
-            .id(Url::parse(&format!("https://localhost/credentials/{id}"))?)
+            .id(Url::parse(format!("https://localhost/credentials/{id}"))?)
             .issuer(Url::parse(issuer.document.id().as_str())?)
             .type_("UniversityDegreeCredential")
             .subject(subject)

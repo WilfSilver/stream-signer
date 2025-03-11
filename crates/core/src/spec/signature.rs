@@ -41,6 +41,5 @@ where
 
     // TODO: Handle error
     let decoded = STANDARD_NO_PAD.decode(s).unwrap();
-    let signature: Signature = decoded.try_into().unwrap();
-    Ok(signature)
+    Ok(decoded)
 }

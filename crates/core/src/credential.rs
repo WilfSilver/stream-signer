@@ -55,7 +55,7 @@ impl From<ResolverError> for SignerError {
 pub enum SignerState {
     Invalid(Vec<Arc<JwtValidationError>>),
     ResolverFailed(Arc<ResolverError>),
-    Valid(Signer),
+    Valid(Box<Signer>),
 }
 
 impl From<SignerError> for SignerState {
@@ -74,7 +74,7 @@ impl From<Result<Signer, SignerError>> for SignerState {
     #[inline]
     fn from(value: Result<Signer, SignerError>) -> Self {
         match value {
-            Ok(signer) => Self::Valid(signer),
+            Ok(signer) => Self::Valid(Box::new(signer)),
             Err(e) => e.into(),
         }
     }
@@ -137,23 +137,23 @@ impl CredentialStore {
     ///
     /// # // A client that can resolve DIDs of our invented "foo" method.
     /// # struct Client;
-
+    ///
     /// # impl Client {
     /// #   // Resolves some of the DIDs we are interested in.
     /// #   async fn resolve(&self, _did: &CoreDID) -> std::result::Result<CoreDocument, std::io::Error> {
     /// #     todo!()
     /// #   }
     /// # }
-
+    ///
     /// # // This way we can essentially produce (cheap) clones of our client.
     /// # let client = std::sync::Arc::new(Client {});
-
+    ///
     /// # // Get a clone we can move into a handler.
     /// # let client_clone = client.clone();
-
+    ///
     /// # // Construct a resolver that resolves documents of type `CoreDocument`.
     /// # let mut resolver = Resolver::<CoreDocument>::new();
-
+    ///
     /// # // Now we want to attach a handler that uses the client to resolve DIDs whose method is "foo".
     /// # resolver.attach_handler("foo".to_owned(), move |did: CoreDID| {
     /// #   // We want to resolve the did asynchronously, but since we do not know when it will be awaited we

@@ -143,8 +143,9 @@ mod verifying {
 
             let delayed = DelayedStream::<_, _>::new(buf_capacity, stream::iter(iter));
 
-            let state_cache: Arc<Mutex<HashMap<(Timestamp, &Vec<u8>), SignatureState>>> =
-                Arc::new(Mutex::new(HashMap::new()));
+            type SigID<'a> = (Timestamp, &'a Vec<u8>);
+            type SigCache<'a> = HashMap<SigID<'a>, SignatureState>;
+            let state_cache: Arc<Mutex<SigCache>> = Arc::new(Mutex::new(HashMap::new()));
 
             // TODO: THERE ARE WAYYY TOO MANY CLONES AHHHH
             // TODO: This must be passed in
@@ -161,7 +162,7 @@ mod verifying {
                     let state_cache = state_cache.clone();
                     async move {
                         let frame: Frame = match &frame.1 {
-                            Ok(f) => f.clone().into(),
+                            Ok(f) => f.clone(),
                             Err(e) => return Err(e.clone().into()),
                         };
 
@@ -173,74 +174,73 @@ mod verifying {
                         let buf_ref = &buffer;
                         let fps = frame.fps();
 
-                        let sigs_iter = stream::iter(
-                            signfile.get_signatures_at(timestamp).into_iter(),
-                        )
-                        .map(|sig| {
-                            let credentials = credentials.clone();
-                            let state_cache = state_cache.clone();
-                            let frame_ref = &frame;
-                            async move {
-                                let start = sig.range.start;
-                                let end = sig.range.end;
-                                let sig = sig.signature;
-                                let cache_key = (start, &sig.signature);
+                        let sigs_iter =
+                            stream::iter(signfile.get_signatures_at(timestamp)).map(|sig| {
+                                let credentials = credentials.clone();
+                                let state_cache = state_cache.clone();
+                                let frame_ref = &frame;
+                                async move {
+                                    let start = sig.range.start;
+                                    let end = sig.range.end;
+                                    let sig = sig.signature;
+                                    let cache_key = (start, &sig.signature);
 
-                                let mut state_cache = state_cache.lock().await;
+                                    let mut state_cache = state_cache.lock().await;
 
-                                // Due to us having to pass to the output of the iterator
-                                let state = match state_cache.get(&cache_key) {
-                                    Some(s) => s.clone(),
-                                    None => {
-                                        // If there is nothing in the cache we
-                                        // will assume this is the first frame
-                                        // for which it is signed for
-                                        let start_frame = 0;
+                                    // Due to us having to pass to the output of the iterator
+                                    let state = match state_cache.get(&cache_key) {
+                                        Some(s) => s.clone(),
+                                        None => {
+                                            // If there is nothing in the cache we
+                                            // will assume this is the first frame
+                                            // for which it is signed for
+                                            let start_frame = 0;
 
-                                        // TODO: Check if the end frame is after 10 second mark
-                                        let end_frame = end.into_frames(fps, self.start_offset)
-                                            - start.into_frames(fps, self.start_offset);
+                                            // TODO: Check if the end frame is after 10 second mark
+                                            let end_frame = end.into_frames(fps, self.start_offset)
+                                                - start.into_frames(fps, self.start_offset);
 
-                                        let frames_buf = Self::frames_to_buffer(
-                                            buf_ref.len(),
-                                            start_frame,
-                                            size,
-                                            // TODO: Investigate why its end_frame - 1
-                                            vec![frame_ref].into_iter().chain(
-                                                buf_ref[0..end_frame - 1].iter().map(|a| {
-                                                    // TODO: Check this
-                                                    // It is safe to unwrap here due to the previous
-                                                    // checks on the frames
-                                                    let res = a.1.as_ref().unwrap();
-                                                    res
-                                                }),
-                                            ),
-                                        );
+                                            let frames_buf = Self::frames_to_buffer(
+                                                buf_ref.len(),
+                                                start_frame,
+                                                size,
+                                                // TODO: Investigate why its end_frame - 1
+                                                vec![frame_ref].into_iter().chain(
+                                                    buf_ref[0..end_frame - 1].iter().map(|a| {
+                                                        // TODO: Check this
+                                                        // It is safe to unwrap here due to the previous
+                                                        // checks on the frames
+                                                        let res = a.1.as_ref().unwrap();
+                                                        res
+                                                    }),
+                                                ),
+                                            );
 
-                                        let mut credentials = credentials.lock().await;
+                                            let mut credentials = credentials.lock().await;
 
-                                        let signer =
-                                            credentials.normalise(sig.presentation.clone()).await;
+                                            let signer = credentials
+                                                .normalise(sig.presentation.clone())
+                                                .await;
 
-                                        let state = SignatureState::from_signer(
-                                            signer,
-                                            VerificationInput {
-                                                alg: JwsAlgorithm::EdDSA,
-                                                signing_input: frames_buf.into_boxed_slice(),
-                                                decoded_signature: sig
-                                                    .signature
-                                                    .clone()
-                                                    .into_boxed_slice(),
-                                            },
-                                        );
-                                        state_cache.insert(cache_key, state.clone());
-                                        state
-                                    }
-                                };
+                                            let state = SignatureState::from_signer(
+                                                signer,
+                                                VerificationInput {
+                                                    alg: JwsAlgorithm::EdDSA,
+                                                    signing_input: frames_buf.into_boxed_slice(),
+                                                    decoded_signature: sig
+                                                        .signature
+                                                        .clone()
+                                                        .into_boxed_slice(),
+                                                },
+                                            );
+                                            state_cache.insert(cache_key, state.clone());
+                                            state
+                                        }
+                                    };
 
-                                Ok(state)
-                            }
-                        });
+                                    Ok(state)
+                                }
+                            });
 
                         let signatures = sigs_iter
                             .fold(Ok(vec![]), |state, info| async {
@@ -411,28 +411,34 @@ mod signing {
                 let sign_info = sign_with(FrameInfo::new(frame.clone(), timestamp, i, fps));
 
                 frame_buffer.push_back(frame);
-                let mut chunks: HashMap<
-                    Timestamp,
-                    Vec<
-                        Pin<
-                            Box<
-                                dyn Future<Output = Result<SignatureInfo, JwkStorageDocumentError>>,
-                            >,
-                        >,
-                    >,
-                > = HashMap::new();
+
+                type SigInfoReturn = Result<SignatureInfo, JwkStorageDocumentError>;
+                type FutureSigInfo<'b> = Pin<Box<dyn Future<Output = SigInfoReturn> + 'b>>;
+
+                let mut chunks: HashMap<Timestamp, Vec<FutureSigInfo>> = HashMap::new();
                 for si in sign_info.into_iter() {
                     // TODO: Add protections if the timeframe is too short
                     let start = si.start;
-                    let frames_buf = self.get_buffer_for(
-                        size,
-                        &frame_buffer,
+
+                    let start_idx = self.get_start_frame(
+                        frame_buffer.len(),
                         fps,
-                        i,
                         excess_frames,
                         start,
                         timestamp,
+                        i,
                     )?;
+
+                    // TODO: Potentially optimise by grouping sign info with same
+                    // bounds
+                    // TODO: Include audio
+
+                    let frames_buf = Self::frames_to_buffer(
+                        frame_buffer.len(),
+                        start_idx,
+                        size,
+                        frame_buffer.range(start_idx..frame_buffer.len()),
+                    );
 
                     let fut = Box::pin(si.sign(frames_buf, size));
 
@@ -467,32 +473,6 @@ mod signing {
             .collect::<Result<Vec<SignedChunk>, _>>()?;
 
             Ok(res.into_iter())
-        }
-
-        // TODO: Swap to take in object
-        fn get_buffer_for(
-            &self,
-            size: Coord,
-            frame_buffer: &VecDeque<Frame>,
-            fps: Framerate<usize>,
-            frame_idx: usize,
-            excess: usize,
-            start: Timestamp,
-            at: Timestamp,
-        ) -> Result<Vec<u8>, VideoError> {
-            let start_idx =
-                self.get_start_frame(frame_buffer.len(), fps, excess, start, at, frame_idx)?;
-
-            // TODO: Potentially optimise by grouping sign info with same
-            // bounds
-            // TODO: Include audio
-
-            Ok(Self::frames_to_buffer(
-                frame_buffer.len(),
-                start_idx,
-                size,
-                frame_buffer.range(start_idx..frame_buffer.len()),
-            ))
         }
 
         pub fn get_start_frame(
@@ -587,7 +567,7 @@ mod tests {
                             (false, format!("Signature could not resolve: {e:?}"))
                         }
                         SignatureState::Verified(_) => {
-                            (true, format!("Signature resolved correctly"))
+                            (true, "Signature resolved correctly".to_string())
                         }
                     };
 

@@ -31,7 +31,7 @@ impl MemClient {
         let id = rand::distr::Alphanumeric.sample_string(&mut rand::rng(), 32);
         let did = format!("did:{METHOD}:{id}");
 
-        return CoreDID::parse(&did).expect("DID failed to parse");
+        CoreDID::parse(&did).expect("DID failed to parse")
     }
 
     pub fn publish(&mut self, id: CoreDID, doc: CoreDocument) {
