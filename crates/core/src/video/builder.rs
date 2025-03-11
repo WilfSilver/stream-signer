@@ -145,6 +145,7 @@ impl SignPipelineBuilder<'_> {
     /// later
     pub fn build(self) -> Result<SignPipeline, VideoError> {
         let start = self.start_offset;
+        // TODO: Pass sink name
         Ok(SignPipeline::new(self.build_raw_pipeline()?.0, start))
     }
 
