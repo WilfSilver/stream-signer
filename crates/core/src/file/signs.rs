@@ -159,28 +159,6 @@ impl SignFile {
         self.0.insert(chunk.into())
     }
 
-    /// Inserts all the chunks of the given iterator into the sign file
-    ///
-    /// Note: Does not compress overlapping fields
-    ///
-    /// ```
-    /// # let mut sf = SignFile::new();
-    ///
-    /// # sf.push(vec![
-    /// #   SignedChunk::new(0.into(), 1000.into(), vec![signature]),
-    /// #   SignedChunk::new(1000.into(), 2000.into(), vec![signature]),
-    /// #   // ...
-    /// # ]);
-    ///
-    /// # sf.write("./mysignatures.srt");
-    /// ```
-    ///
-    pub fn extend<T: IntoIterator<Item = SignedChunk>>(&mut self, iter: T) {
-        for c in iter {
-            self.push(c)
-        }
-    }
-
     /// Find all the signatures which are applied to the given timestamp and
     /// the full ranges in which they apply for.
     ///
@@ -233,6 +211,31 @@ impl FromIterator<SignedChunk> for SignFile {
         SignFile(Lapper::new(
             iter.into_iter().map(|c| c.into()).collect::<Vec<_>>(),
         ))
+    }
+}
+
+impl Extend<SignedChunk> for SignFile {
+    /// Inserts all the chunks of the given iterator into the sign file
+    ///
+    /// Note: Does not compress overlapping fields
+    ///
+    /// ```
+    /// # let mut sf = SignFile::new();
+    ///
+    /// # sf.push(vec![
+    /// #   SignedChunk::new(0.into(), 1000.into(), vec![signature]),
+    /// #   SignedChunk::new(1000.into(), 2000.into(), vec![signature]),
+    /// #   // ...
+    /// # ]);
+    ///
+    /// # sf.write("./mysignatures.srt");
+    /// ```
+    ///
+    ///
+    fn extend<T: IntoIterator<Item = SignedChunk>>(&mut self, iter: T) {
+        for c in iter {
+            self.push(c)
+        }
     }
 }
 

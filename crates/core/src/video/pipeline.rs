@@ -276,13 +276,15 @@ pub use signing::*;
 
 #[cfg(feature = "signing")]
 mod signing {
-    use futures::future::join_all;
+    use futures::{future::join_all, stream, Stream, StreamExt};
     use identity_iota::storage::JwkStorageDocumentError;
     use std::{
         collections::{HashMap, VecDeque},
         future::Future,
         pin::Pin,
+        sync::Arc,
     };
+    use tokio::sync::Mutex;
 
     use crate::{
         file::{SignedChunk, Timestamp},
@@ -311,11 +313,11 @@ mod signing {
         ///
         /// # sign_file.write("./my_signatures.srt");
         /// ```
-        pub async fn sign_chunks<'a, T: Into<Timestamp>, K, I>(
+        pub fn sign_chunks<'a, T: Into<Timestamp>, K, I>(
             self,
             length: T,
             signer: &'a SignerInfo<'a, K, I>,
-        ) -> Result<impl Iterator<Item = SignedChunk> + 'a, VideoError>
+        ) -> Result<impl Stream<Item = Result<SignedChunk, VideoError>> + 'a, VideoError>
         where
             K: KeyBound + Sync,
             I: KeyIdBound + Sync,
@@ -336,7 +338,6 @@ mod signing {
                     vec![]
                 }
             })
-            .await
         }
 
         /// Signs the current built video writing to the sign_file by calling
@@ -367,14 +368,15 @@ mod signing {
         ///
         /// # sign_file.write("./my_signatures.srt")
         /// ```
-        pub async fn sign<'a, K, I, F, ITER>(
+        /// TODO: Improve errors
+        pub fn sign<'a, K, I, F, ITER>(
             self,
-            mut sign_with: F,
-        ) -> Result<impl Iterator<Item = SignedChunk> + 'a, VideoError>
+            sign_with: F,
+        ) -> Result<impl Stream<Item = Result<SignedChunk, VideoError>> + 'a, VideoError>
         where
             K: KeyBound + 'a + Sync,
             I: KeyIdBound + 'a + Sync,
-            F: FnMut(FrameInfo) -> ITER,
+            F: FnMut(FrameInfo) -> ITER + Send + 'a,
             ITER: IntoIterator<Item = ChunkSigner<'a, K, I>>,
         {
             let start_offset = self.start_offset;
@@ -394,88 +396,102 @@ mod signing {
                     .convert_to_frames(MAX_CHUNK_LENGTH),
                 None => 0,
             };
-            let mut frame_buffer: VecDeque<Frame> = VecDeque::with_capacity(buf_capacity);
 
-            let mut futures: Vec<(Timestamp, _)> = vec![];
+            let frame_buffer = Arc::new(Mutex::new(VecDeque::<Frame>::with_capacity(buf_capacity)));
 
-            // TODO: Somehow swap to iter/stream
-            for (i, frame) in iter {
-                let frame: Frame = frame?;
-                let fps = frame.fps();
-
-                if frame_buffer.len() == buf_capacity {
-                    frame_buffer.pop_front();
-                }
-                let size = Coord::new(frame.width(), frame.height());
-
-                let (timestamp, excess_frames) = Timestamp::from_frames(i, fps, start_offset);
-
-                let sign_info = sign_with(FrameInfo::new(frame.clone(), timestamp, i, fps));
-
-                frame_buffer.push_back(frame);
-
-                type SigInfoReturn = Result<SignatureInfo, JwkStorageDocumentError>;
-                type FutureSigInfo<'b> = Pin<Box<dyn Future<Output = SigInfoReturn> + 'b>>;
-
-                let mut chunks: HashMap<Timestamp, Vec<FutureSigInfo>> = HashMap::new();
-                for si in sign_info.into_iter() {
-                    // TODO: Add protections if the timeframe is too short
-                    let start = si.start;
-
-                    let start_idx = get_start_frame(
-                        start_offset,
-                        frame_buffer.len(),
-                        fps,
-                        excess_frames,
-                        start,
-                        timestamp,
-                        i,
-                    )?;
-
-                    // TODO: Potentially optimise by grouping sign info with same
-                    // bounds
-                    // TODO: Include audio
-
-                    let frames_buf = Self::frames_to_buffer(
-                        frame_buffer.len(),
-                        start_idx,
-                        size,
-                        frame_buffer.range(start_idx..frame_buffer.len()),
-                    );
-
-                    let fut = Box::pin(si.sign(frames_buf, size));
-
-                    match chunks.get_mut(&start) {
-                        Some(c) => c.push(fut),
-                        None => {
-                            chunks.insert(start, vec![fut]);
-                        }
-                    }
-                }
-                futures.push((timestamp, chunks));
-            }
-
-            let res = join_all(futures.into_iter().map(|(end, chunks)| async move {
-                join_all(chunks.into_iter().map(|(start, futures)| async move {
-                    join_all(futures).await.into_iter().try_fold(
-                        SignedChunk::new(start, end, vec![]),
-                        |mut curr, signature| match signature {
-                            Ok(sig) => {
-                                curr.val.push(sig);
-                                Ok(curr)
+            let sign_with = Arc::new(Mutex::new(sign_with));
+            let res = stream::iter(iter)
+                .then(move |(i, frame)| {
+                    let frame_buffer = frame_buffer.clone();
+                    let sign_with = sign_with.clone();
+                    async move {
+                        let frame = match frame {
+                            Ok(f) => f,
+                            Err(e) => {
+                                return Box::pin(stream::iter([Err(e.into())]))
+                                    as Pin<Box<dyn Stream<Item = _>>>
                             }
-                            Err(e) => Err(e),
-                        },
-                    )
-                }))
-                .await
-            }))
-            .await
-            .into_iter()
-            .flatten()
-            .collect::<Result<Vec<SignedChunk>, _>>()?;
+                        };
 
-            Ok(res.into_iter())
+                        let fps = frame.fps();
+
+                        let mut buffer = frame_buffer.lock().await;
+                        if buffer.len() == buf_capacity {
+                            buffer.pop_front();
+                        }
+                        let size = Coord::new(frame.width(), frame.height());
+
+                        let (timestamp, excess_frames) =
+                            Timestamp::from_frames(i, fps, start_offset);
+
+                        let mut sign_with = sign_with.lock().await;
+                        let sign_info = sign_with(FrameInfo::new(frame.clone(), timestamp, i, fps));
+
+                        buffer.push_back(frame);
+
+                        type SigInfoReturn = Result<SignatureInfo, JwkStorageDocumentError>;
+                        type FutureSigInfo<'b> = Pin<Box<dyn Future<Output = SigInfoReturn> + 'b>>;
+
+                        let mut chunks: HashMap<Timestamp, Vec<FutureSigInfo>> = HashMap::new();
+                        for si in sign_info.into_iter() {
+                            // TODO: Add protections if the timeframe is too short/long
+                            let start = si.start;
+
+                            let start_idx = get_start_frame(
+                                start_offset,
+                                buffer.len(),
+                                fps,
+                                excess_frames,
+                                start,
+                                timestamp,
+                                i,
+                            );
+
+                            let start_idx = match start_idx {
+                                Ok(i) => i,
+                                Err(e) => return Box::pin(stream::iter([Err(e)])),
+                            };
+
+                            // TODO: Potentially optimise by grouping sign info with same
+                            // bounds
+                            // TODO: Include audio
+
+                            let frames_buf = Self::frames_to_buffer(
+                                buffer.len(),
+                                start_idx,
+                                size,
+                                buffer.range(start_idx..buffer.len()),
+                            );
+
+                            let fut = Box::pin(si.sign(frames_buf, size));
+
+                            match chunks.get_mut(&start) {
+                                Some(c) => c.push(fut),
+                                None => {
+                                    chunks.insert(start, vec![fut]);
+                                }
+                            }
+                        }
+
+                        let res = stream::iter(chunks).then(move |(start, futures)| async move {
+                            join_all(futures).await.into_iter().try_fold(
+                                SignedChunk::new(start, timestamp, vec![]),
+                                |mut curr, signature| match signature {
+                                    Ok(sig) => {
+                                        curr.val.push(sig);
+                                        Ok(curr)
+                                    }
+                                    Err(e) => Err(e.into()),
+                                },
+                            )
+                        });
+
+                        Box::pin(res)
+                    }
+                })
+                .flatten();
+
+            Ok(res)
         }
     }
     fn get_start_frame(
@@ -495,7 +511,7 @@ mod signing {
 
 #[cfg(test)]
 mod tests {
-    use futures::{future, StreamExt};
+    use futures::{future, StreamExt, TryStreamExt};
     use identity_iota::{core::FromJson, credential::Subject, did::DID};
     use serde_json::json;
 
@@ -540,9 +556,9 @@ mod tests {
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
         let signfile = pipe
-            .sign_chunks(100, &identity.gen_signer_info()?)
-            .await?
-            .collect::<SignFile>();
+            .sign_chunks(100, &identity.gen_signer_info()?)?
+            .try_collect::<SignFile>()
+            .await?;
 
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 

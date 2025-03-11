@@ -8,7 +8,7 @@ use std::{
 
 use common_gui::{state::VideoState, video::VideoPlayer};
 use druid::{Code, Color, Data, Event, Lens, LifeCycle, LifeCycleCtx, RenderContext, Widget};
-use futures::executor::block_on;
+use futures::{executor::block_on, TryStreamExt};
 use identity_iota::{
     core::FromJson,
     credential::Subject,
@@ -111,9 +111,10 @@ impl SignPlayer {
                     vec![]
                 }
             })
+            .expect("Failed to initiate video")
+            .try_collect::<SignFile>()
             .await
-            .expect("Failed to sign pipeline")
-            .collect::<SignFile>();
+            .expect("Failed to sign frame");
 
         // TODO: Have a button to return to the main menu
         event_sink.add_idle_callback(move |data: &mut AppData| {
