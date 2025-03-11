@@ -19,10 +19,10 @@ use serde_json::json;
 use stream_signer::{
     file::Timestamp,
     gst,
-    tests::{client::get_client, identity::TestIdentity, issuer::TestIssuer},
-    video::{ChunkSigner, FramerateOption, MAX_CHUNK_LENGTH},
+    video::{ChunkSigner, FramerateOption, GenSignerInfo, MAX_CHUNK_LENGTH},
     SignFile, SignPipeline,
 };
+use testlibs::{client::get_client, identity::TestIdentity, issuer::TestIssuer};
 
 use crate::state::{AppData, View};
 

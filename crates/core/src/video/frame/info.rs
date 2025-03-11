@@ -21,11 +21,11 @@ use super::{Frame, Framerate};
 /// millisecond which is a multiple of `x` then you can simply do:
 ///
 /// ```
-/// # let tr: TimeRange = ...;
+/// use stream_signer::video::frame::TimeRange;
+/// let tr: TimeRange = TimeRange::new(495, 99.5);
 ///
-/// # if tr % 100 == 0 {
-/// #   // Do something
-/// # }
+/// assert_eq!(tr % 100.into(), TimeRange::new(95, 99.5));
+/// assert!((tr % 100.into()).previous().is_start());
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TimeRange {
@@ -34,7 +34,7 @@ pub struct TimeRange {
 }
 
 impl TimeRange {
-    fn new<T: Into<f64>>(timestamp: T, frame_duration: f64) -> Self {
+    pub fn new<T: Into<f64>>(timestamp: T, frame_duration: f64) -> Self {
         let start: f64 = timestamp.into();
         Self {
             start,

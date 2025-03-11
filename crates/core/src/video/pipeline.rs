@@ -30,7 +30,7 @@ impl SignPipeline {
     }
 
     /// This consumes the object and converts it into an iterator over every
-    /// frame with the given [VideoFrame] type.
+    /// frame with the given [gst::Sample] type.
     ///
     /// Parts of this function was inspired by [`vid_frame_iter`](https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter)
     pub fn try_into_iter(self) -> Result<SampleIter, VideoError> {
@@ -115,7 +115,8 @@ mod verifying {
     use super::*;
 
     impl SignPipeline {
-        // TODO: Swap to iterator
+        // TODO: Write documentation :)
+        // TODO: Split into mutliple functions?
         pub fn verify(
             self,
             resolver: Resolver,
@@ -302,17 +303,64 @@ mod signing {
         ///
         /// For example if you wanted to sign in 100ms second intervals
         ///
+        /// ```no_run
+        /// # use std::error::Error;
+        /// # use identity_iota::{core::FromJson, credential::Subject, did::DID};
+        /// # use serde_json::json;
+        /// # use testlibs::{
+        /// #     client::get_client,
+        /// #     identity::TestIdentity,
+        /// #     issuer::TestIssuer,
+        /// #     test_video, videos,
+        /// # };
+        ///
+        /// #
+        /// # #[tokio::main]
+        /// # async fn main() -> Result<(), Box<dyn Error>> {
+        /// use futures::TryStreamExt;
+        /// use stream_signer::{video::SignerInfo, SignPipeline, SignFile};
+        ///
+        /// stream_signer::gst::init()?;
+        ///
+        /// # let client = get_client();
+        /// # let issuer = TestIssuer::new(client.clone()).await?;
+        ///
+        /// # let identity = TestIdentity::new(&issuer, |id| {
+        /// #     Subject::from_json_value(json!({
+        /// #       "id": id.as_str(),
+        /// #       "name": "Alice",
+        /// #       "degree": {
+        /// #         "type": "BachelorDegree",
+        /// #         "name": "Bachelor of Science and Arts",
+        /// #       },
+        /// #       "GPA": "4.0",
+        /// #     })).unwrap()
+        /// # })
+        /// # .await?;
+        ///
+        /// # let presentation = identity.build_presentation()?;
+        ///
+        /// let pipeline = SignPipeline::build("https://example.com/video_feed").build()?;
+        ///
+        /// let signer_info = SignerInfo {
+        ///     document: &identity.document,
+        ///     storage: &identity.storage,
+        ///     fragment: &identity.fragment,
+        ///     presentation,
+        /// };
+        ///
+        /// let sign_file = pipeline.sign_chunks(100, &signer_info)
+        ///     .expect("Failed to start stream")
+        ///     .try_collect::<SignFile>()
+        ///     .await
+        ///     .expect("Failed to look at frame");
+        ///
+        /// sign_file.write("./my_signatures.ssrt").expect("Failed to write signfile");
+        ///
+        /// # Ok(())
+        /// # }
         /// ```
-        /// # use stream_signer::{SignPipeline, SignFile};
         ///
-        /// # let pipeline = SignPipeline::builder("https://example.com/video_feed").build()?;
-        /// # let credential: Credential = ...;
-        /// # let keypair: Keypair = ...;
-        ///
-        /// # let sign_file = pipeline.sign_chunks(100, credential, keypair)?.collect::<SignFile>();
-        ///
-        /// # sign_file.write("./my_signatures.srt");
-        /// ```
         pub fn sign_chunks<'a, T: Into<Timestamp>, K, I>(
             self,
             length: T,
@@ -350,23 +398,74 @@ mod signing {
         /// For example if you wanted to sign a video in 100ms second intervals you
         /// could do the following
         ///
-        /// ```
-        /// # use stream_signer::{SignPipeline, ChunkSigner};
+        /// ```no_run
+        /// # use std::error::Error;
+        /// # use identity_iota::{core::FromJson, credential::Subject, did::DID};
+        /// # use serde_json::json;
+        /// # use testlibs::{
+        /// #     client::get_client,
+        /// #     identity::TestIdentity,
+        /// #     issuer::TestIssuer,
+        /// #     test_video, videos,
+        /// # };
         ///
-        /// # let pipeline = SignPipeline::builder("https://example.com/video_feed").build()?;
+        /// #
+        /// # #[tokio::main]
+        /// # async fn main() -> Result<(), Box<dyn Error>> {
+        /// use futures::TryStreamExt;
+        /// use stream_signer::{video::{ChunkSigner, SignerInfo}, SignPipeline, SignFile};
         ///
-        /// # let sign_file = pipeline.sign(|info| {
-        /// #   // ...
-        /// #   if !info.time.is_start() && info.time.multiple_of(100) {
-        /// #     vec![
-        /// #       ChunkSigner::new(time - 100, my_credential, my_keypair),
-        /// #     ]
-        /// #   } else {
-        /// #     vec![]
-        /// #   }
-        /// # }).collect::<SignFile>();
+        /// stream_signer::gst::init()?;
         ///
-        /// # sign_file.write("./my_signatures.srt")
+        /// # let client = get_client();
+        /// # let issuer = TestIssuer::new(client.clone()).await?;
+        ///
+        /// # let identity = TestIdentity::new(&issuer, |id| {
+        /// #     Subject::from_json_value(json!({
+        /// #       "id": id.as_str(),
+        /// #       "name": "Alice",
+        /// #       "degree": {
+        /// #         "type": "BachelorDegree",
+        /// #         "name": "Bachelor of Science and Arts",
+        /// #       },
+        /// #       "GPA": "4.0",
+        /// #     })).unwrap()
+        /// # })
+        /// # .await?;
+        ///
+        /// # let presentation = identity.build_presentation()?;
+        ///
+        /// let pipeline = SignPipeline::build("https://example.com/video_feed").build()?;
+        ///
+        /// let signer_info = SignerInfo {
+        ///     document: &identity.document,
+        ///     storage: &identity.storage,
+        ///     fragment: &identity.fragment,
+        ///     presentation,
+        /// };
+        ///
+        /// let mut is_first = true;
+        /// let sign_file = pipeline.sign(|info| {
+        ///   // ...
+        ///   if !info.time.is_start() && info.time.multiple_of(100) {
+        ///     let res = vec![
+        ///       ChunkSigner::new(info.time.start() - 100, &signer_info, is_first),
+        ///     ];
+        ///     is_first = false;
+        ///     res
+        ///   } else {
+        ///     vec![]
+        ///   }
+        /// })
+        /// .expect("Failed to start stream")
+        /// .try_collect::<SignFile>()
+        /// .await
+        /// .expect("Failed to look at frame");
+        ///
+        /// sign_file.write("./my_signatures.ssrt").expect("Failed to write signfile");
+        ///
+        /// # Ok(())
+        /// # }
         /// ```
         /// TODO: Improve errors
         pub fn sign<'a, K, I, F, ITER>(
@@ -514,20 +613,20 @@ mod tests {
     use futures::{future, StreamExt, TryStreamExt};
     use identity_iota::{core::FromJson, credential::Subject, did::DID};
     use serde_json::json;
+    use std::error::Error;
+    use testlibs::{
+        client::{get_client, get_resolver},
+        identity::TestIdentity,
+        issuer::TestIssuer,
+        test_video, videos,
+    };
 
     use super::*;
 
     use crate::{
-        tests::{
-            client::{get_client, get_resolver},
-            identity::TestIdentity,
-            issuer::TestIssuer,
-            test_video, videos,
-        },
-        video::verify::SignatureState,
+        video::{verify::SignatureState, GenSignerInfo},
         SignFile,
     };
-    use std::error::Error;
 
     #[tokio::test]
     async fn sign_and_verify() -> Result<(), Box<dyn Error>> {

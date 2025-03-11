@@ -8,6 +8,3 @@ pub use crate::file::{time, SignFile};
 pub use video::SignPipeline;
 
 pub use gst;
-
-#[cfg(any(test, feature = "testlibs"))]
-pub mod tests;

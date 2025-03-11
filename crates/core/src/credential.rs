@@ -23,7 +23,7 @@ pub type Credential = DecodedJwtCredential;
 #[derive(Error, Clone, Debug)]
 #[error("Unknown key id used: {0}")]
 pub struct UnknownKey(String);
-///
+
 /// Quick bridge to [SignerState], allowing to use the type `Result<Signer, SignerError>`
 enum SignerError {
     Validation(Vec<JwtValidationError>),
@@ -111,20 +111,29 @@ impl CredentialStore {
     ///
     /// ### With Iota
     ///
-    /// ```
-    /// # use iota_sdk::client::Client;
-    /// # use identity_iota::resolver::Resolver;
-    /// # use stream_signer::CredentiaLStore;
+    /// ```no_run
+    /// # use std::error::Error;
+    /// #
+    /// # const API_ENDPOINT: &str = "http://localhost";
+    /// #
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn Error>> {
+    /// use iota_sdk::client::Client;
+    /// use identity_iota::resolver::Resolver;
+    /// use stream_signer::CredentialStore;
     ///
-    /// # let client: Client = Client::builder()
-    /// #   .with_primary_node(API_ENDPOINT, None)?
-    /// #   .finish()
-    /// #   .await?;
+    /// let client: Client = Client::builder()
+    ///   .with_primary_node(API_ENDPOINT, None)?
+    ///   .finish()
+    ///   .await?;
     ///
-    /// # let mut resolver = Resolver::new();
-    /// # resolver.attach_iota_handler(client);
+    /// let mut resolver = Resolver::new();
+    /// resolver.attach_iota_handler(client);
     ///
-    /// # let store = CredentialStore::new(resolver);
+    /// let store = CredentialStore::new(resolver);
+    ///
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// ### With Custom Client
@@ -132,35 +141,39 @@ impl CredentialStore {
     /// For extra examples see [Resolver::attach_handler]
     ///
     /// ```
-    /// # use identity_iota::resolver::Resolver;
-    /// # use stream_signer::CredentiaLStore;
+    /// use identity_iota::did::CoreDID;
+    /// use identity_iota::document::CoreDocument;
+    /// use identity_iota::resolver::Resolver;
+    /// use stream_signer::CredentialStore;
     ///
-    /// # // A client that can resolve DIDs of our invented "foo" method.
-    /// # struct Client;
+    /// // A client that can resolve DIDs of our invented "foo" method.
+    /// struct Client;
     ///
-    /// # impl Client {
-    /// #   // Resolves some of the DIDs we are interested in.
-    /// #   async fn resolve(&self, _did: &CoreDID) -> std::result::Result<CoreDocument, std::io::Error> {
-    /// #     todo!()
-    /// #   }
-    /// # }
+    /// impl Client {
+    ///   // Resolves some of the DIDs we are interested in.
+    ///   async fn resolve(&self, _did: &CoreDID) -> std::result::Result<CoreDocument, std::io::Error> {
+    ///     todo!()
+    ///   }
+    /// }
     ///
-    /// # // This way we can essentially produce (cheap) clones of our client.
-    /// # let client = std::sync::Arc::new(Client {});
+    /// // This way we can essentially produce (cheap) clones of our client.
+    /// let client = std::sync::Arc::new(Client {});
     ///
-    /// # // Get a clone we can move into a handler.
-    /// # let client_clone = client.clone();
+    /// // Get a clone we can move into a handler.
+    /// let client_clone = client.clone();
     ///
-    /// # // Construct a resolver that resolves documents of type `CoreDocument`.
-    /// # let mut resolver = Resolver::<CoreDocument>::new();
+    /// // Construct a resolver that resolves documents of type `CoreDocument`.
+    /// let mut resolver = Resolver::<CoreDocument>::new();
     ///
-    /// # // Now we want to attach a handler that uses the client to resolve DIDs whose method is "foo".
-    /// # resolver.attach_handler("foo".to_owned(), move |did: CoreDID| {
-    /// #   // We want to resolve the did asynchronously, but since we do not know when it will be awaited we
-    /// #   // let the future take ownership of the client by moving a clone into the asynchronous block.
-    /// #   let future_client = client_clone.clone();
-    /// #   async move { future_client.resolve(&did).await }
-    /// # });
+    /// // Now we want to attach a handler that uses the client to resolve DIDs whose method is "foo".
+    /// resolver.attach_handler("foo".to_owned(), move |did: CoreDID| {
+    ///   // We want to resolve the did asynchronously, but since we do not know when it will be awaited we
+    ///   // let the future take ownership of the client by moving a clone into the asynchronous block.
+    ///   let future_client = client_clone.clone();
+    ///   async move { future_client.resolve(&did).await }
+    /// });
+    ///
+    /// let store = CredentialStore::new(resolver);
     /// ```
     pub fn new(resolver: Resolver) -> Self {
         Self {

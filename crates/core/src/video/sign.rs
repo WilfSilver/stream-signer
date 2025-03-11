@@ -162,3 +162,28 @@ where
         })
     }
 }
+
+#[cfg(any(test, feature = "testlibs"))]
+pub use testlib_extras::*;
+
+#[cfg(any(test, feature = "testlibs"))]
+mod testlib_extras {
+    use super::*;
+    use identity_iota::storage::{JwkMemStore, KeyIdMemstore};
+    use testlibs::anyhow;
+    use testlibs::identity::TestIdentity;
+
+    pub trait GenSignerInfo {
+        fn gen_signer_info(&self) -> anyhow::Result<SignerInfo<'_, JwkMemStore, KeyIdMemstore>>;
+    }
+    impl GenSignerInfo for TestIdentity {
+        fn gen_signer_info(&self) -> anyhow::Result<SignerInfo<'_, JwkMemStore, KeyIdMemstore>> {
+            Ok(SignerInfo {
+                document: &self.document,
+                presentation: self.build_presentation()?,
+                storage: &self.storage,
+                fragment: &self.fragment,
+            })
+        }
+    }
+}

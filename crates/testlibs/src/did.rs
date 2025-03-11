@@ -5,12 +5,12 @@ use identity_iota::{
     did::CoreDID,
     document::CoreDocument,
     storage::{JwkDocumentExt, JwkMemStore},
-    verification::{jws::JwsAlgorithm, MethodScope},
+    verification::{MethodScope, jws::JwsAlgorithm},
 };
 use iota_sdk::{
     client::{
         api::GetAddressesOptions,
-        secret::{mnemonic::MnemonicSecretManager, SecretManager},
+        secret::{SecretManager, mnemonic::MnemonicSecretManager},
     },
     crypto::keys::bip39,
     types::block::address::{Address, Bech32Address, Hrp},

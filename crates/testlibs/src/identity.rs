@@ -9,19 +9,16 @@ use identity_iota::{
 use iota_sdk::client::secret::SecretManager;
 use rand::distr::SampleString;
 
-#[cfg(feature = "signing")]
-use crate::video::SignerInfo;
-
 use super::{
     did,
     issuer::{MemStorage, TestIssuer},
 };
 
 pub struct TestIdentity {
-    _manager: SecretManager,
-    storage: MemStorage,
-    _credential: Credential,
-    jwt: Jwt,
+    pub manager: SecretManager,
+    pub storage: MemStorage,
+    pub credential: Credential,
+    pub jwt: Jwt,
     pub document: CoreDocument,
     pub fragment: String,
 }
@@ -49,8 +46,8 @@ impl TestIdentity {
         let jwt = issuer.create_credential_jwt(&credential).await?;
 
         Ok(Self {
-            _credential: credential,
-            _manager: manager,
+            credential,
+            manager,
             storage,
             document,
             fragment,
@@ -64,15 +61,5 @@ impl TestIdentity {
                 .credential(self.jwt.clone())
                 .build()?,
         )
-    }
-
-    #[cfg(feature = "signing")]
-    pub fn gen_signer_info(&self) -> Result<SignerInfo<'_, JwkMemStore, KeyIdMemstore>> {
-        Ok(SignerInfo {
-            document: &self.document,
-            presentation: self.build_presentation()?,
-            storage: &self.storage,
-            fragment: &self.fragment,
-        })
     }
 }

@@ -92,24 +92,47 @@ impl<'a> SignatureWithRange<'a> {
 /// Cache of information about all the signatures for one video. This includes
 /// support for overlapping time ranges.
 ///
+/// This reads from a file of type `.srt` -- you will notice all examples use
+/// `.ssrt` to stand for "signature srt".
+///
 /// Creating a signature file
 ///
-/// ```
-/// # let mut sf = SignFile::new();
+/// ```no_run
+/// use stream_signer::{
+///     file::{SignFile, SignedChunk},
+///     spec::{Coord, PresentationReference, SignatureInfo},
+/// };
+/// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 ///
-/// # sf.push(chunk);
+/// let mut sf = SignFile::new();
 ///
-/// # sf.write("./mysignatures.srt");
+/// // Example signature
+/// let s = "i0aL5051w2ADiUk3nljIz1Fk91S3ux3UTidX/B4EU058IKuzD9gcZ3vXAfS2coeCC4gRSiJSmDocHDeXW5tMCw";
+///
+/// let signature_info = SignatureInfo {
+///      pos: Coord::new(0, 0),
+///      size: Coord::new(1920, 1080),
+///      presentation: PresentationReference {
+///          id: "my_presentation_id".to_string(),
+///      }.into(),
+///      signature: STANDARD_NO_PAD.decode(s).unwrap()
+/// };
+///
+/// sf.push(SignedChunk::new(0.into(), 1000.into(), vec![signature_info]));
+///
+/// sf.write("./mysignatures.ssrt").expect("Failed to write signature file");
 /// ```
 ///
 /// Or reading signatures for a given time frame
 ///
-/// ```
-/// # let sf = SignFile::from_file("./mysignatures.srt")
+/// ```no_run
+/// use stream_signer::SignFile;
 ///
-/// # for s in sf.get_signatures_at(2000) { // Get at 2 seconds mark
-/// #   // ...
-/// # }
+/// let sf = SignFile::from_file("./mysignatures.ssrt").expect("Failed to read sign file");
+///
+/// for s in sf.get_signatures_at(2000.into()) { // Get at 2 seconds mark
+///   // ...
+/// }
 /// ```
 ///
 #[derive(Debug)]
@@ -136,6 +159,8 @@ impl SignFile {
         Self::from_subtitles(subs)
     }
 
+    /// Generates directly from [Subtitles], normally read from an `.srt` file
+    /// beforehand
     fn from_subtitles(subs: Subtitles) -> Result<Self, ParseError> {
         let chunks = subs
             .into_iter()
@@ -147,12 +172,30 @@ impl SignFile {
 
     /// Inserts a new signed chunk into the signatures list
     ///
-    /// ```
-    /// # let mut sf = SignFile::new();
+    /// ```no_run
+    /// use stream_signer::{
+    ///     file::{SignFile, SignedChunk},
+    ///     spec::{Coord, PresentationReference, SignatureInfo},
+    /// };
+    /// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
     ///
-    /// # sf.push(SignedChunk::new(0.into(), 1000.into(), vec![signature]));
+    /// let mut sf = SignFile::new();
     ///
-    /// # sf.write("./mysignatures.srt");
+    /// // Example signature
+    /// let s = "i0aL5051w2ADiUk3nljIz1Fk91S3ux3UTidX/B4EU058IKuzD9gcZ3vXAfS2coeCC4gRSiJSmDocHDeXW5tMCw";
+    ///
+    /// let signature_info = SignatureInfo {
+    ///      pos: Coord::new(0, 0),
+    ///      size: Coord::new(1920, 1080),
+    ///      presentation: PresentationReference {
+    ///          id: "my_presentation_id".to_string(),
+    ///      }.into(),
+    ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
+    /// };
+    ///
+    /// sf.push(SignedChunk::new(0.into(), 1000.into(), vec![signature_info]));
+    ///
+    /// sf.write("./mysignatures.ssrt").expect("Failed to write to file");
     /// ```
     ///
     pub fn push(&mut self, chunk: SignedChunk) {
@@ -162,12 +205,14 @@ impl SignFile {
     /// Find all the signatures which are applied to the given timestamp and
     /// the full ranges in which they apply for.
     ///
-    /// ```
-    /// # let sf = SignFile::from_file("./mysignatures.srt")
+    /// ```no_run
+    /// use stream_signer::SignFile;
     ///
-    /// # for s in sf.get_signatures_at(2000) { // Get at 2 seconds mark
-    /// #   // ...
-    /// # }
+    /// let sf = SignFile::from_file("./mysignatures.ssrt").expect("Failed to read file");
+    ///
+    /// for s in sf.get_signatures_at(2000.into()) { // Get at 2 seconds mark
+    ///   // ...
+    /// }
     /// ```
     ///
     pub fn get_signatures_at(&self, at: Timestamp) -> impl Iterator<Item = SignatureWithRange<'_>> {
@@ -186,12 +231,30 @@ impl SignFile {
 
     /// Writes the current store to a specified srt file
     ///
-    /// ```
-    /// # let mut sf = SignFile::new();
+    /// ```no_run
+    /// use stream_signer::{
+    ///     file::{SignFile, SignedChunk},
+    ///     spec::{Coord, PresentationReference, SignatureInfo},
+    /// };
+    /// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
     ///
-    /// # sf.push(SignedChunk::new(0.into(), 1000.into(), vec![signature]));
+    /// let mut sf = SignFile::new();
     ///
-    /// # sf.write("./mysignatures.srt");
+    /// // Example signature
+    /// let s = "i0aL5051w2ADiUk3nljIz1Fk91S3ux3UTidX/B4EU058IKuzD9gcZ3vXAfS2coeCC4gRSiJSmDocHDeXW5tMCw";
+    ///
+    /// let signature_info = SignatureInfo {
+    ///      pos: Coord::new(0, 0),
+    ///      size: Coord::new(1920, 1080),
+    ///      presentation: PresentationReference {
+    ///          id: "my_presentation_id".to_string(),
+    ///      }.into(),
+    ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
+    /// };
+    ///
+    /// sf.push(SignedChunk::new(0.into(), 1000.into(), vec![signature_info]));
+    ///
+    /// sf.write("./mysignatures.ssrt").expect("Failed to write sign file");
     /// ```
     ///
     pub fn write<P: AsRef<Path>>(&self, path: P) -> Result<(), ParseError> {
@@ -219,16 +282,43 @@ impl Extend<SignedChunk> for SignFile {
     ///
     /// Note: Does not compress overlapping fields
     ///
-    /// ```
-    /// # let mut sf = SignFile::new();
+    /// ```no_run
+    /// use stream_signer::{
+    ///     file::{SignFile, SignedChunk},
+    ///     spec::{Coord, PresentationReference, SignatureInfo},
+    /// };
+    /// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
     ///
-    /// # sf.push(vec![
-    /// #   SignedChunk::new(0.into(), 1000.into(), vec![signature]),
-    /// #   SignedChunk::new(1000.into(), 2000.into(), vec![signature]),
-    /// #   // ...
-    /// # ]);
+    /// let mut sf = SignFile::new();
     ///
-    /// # sf.write("./mysignatures.srt");
+    /// // Example signature
+    /// let s = "i0aL5051w2ADiUk3nljIz1Fk91S3ux3UTidX/B4EU058IKuzD9gcZ3vXAfS2coeCC4gRSiJSmDocHDeXW5tMCw";
+    ///
+    /// let first_signature = SignatureInfo {
+    ///      pos: Coord::new(0, 0),
+    ///      size: Coord::new(1920, 1080),
+    ///      presentation: PresentationReference {
+    ///          id: "my_presentation_id".to_string(),
+    ///      }.into(),
+    ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
+    /// };
+    ///
+    /// let second_signature = SignatureInfo {
+    ///      pos: Coord::new(0, 0),
+    ///      size: Coord::new(1920, 1080),
+    ///      presentation: PresentationReference {
+    ///          id: "my_presentation_id".to_string(),
+    ///      }.into(),
+    ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
+    /// };
+    ///
+    /// sf.extend(vec![
+    ///   SignedChunk::new(0.into(), 1000.into(), vec![first_signature]),
+    ///   SignedChunk::new(1000.into(), 2000.into(), vec![second_signature]),
+    ///   // ...
+    /// ]);
+    ///
+    /// sf.write("./mysignatures.ssrt").expect("Failed to write to file");
     /// ```
     ///
     ///

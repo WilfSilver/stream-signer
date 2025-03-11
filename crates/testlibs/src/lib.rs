@@ -5,6 +5,7 @@ pub mod issuer;
 
 use std::env;
 
+pub use anyhow;
 pub use iota_sdk;
 
 pub mod videos {
