@@ -77,7 +77,7 @@ jobs:
       - name: Run cargo doc
         uses: actions-rs/cargo@v1
         env:
-          RUSTFLAGS: "-D warnings"
+          RUSTDOCFLAGS: "-D warnings"
         with:
           command: doc
           args: --all --no-deps

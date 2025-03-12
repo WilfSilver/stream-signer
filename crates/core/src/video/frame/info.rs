@@ -59,7 +59,7 @@ impl TimeRange {
     /// This checks if the given timestamp is in the current
     /// [range](TimeRange::range).
     ///
-    /// This is equivalent to the implementation of [PartialEq<Timestamp>::eq]
+    /// This is equivalent to the implementation of [`PartialEq<Timestamp>::eq`]
     /// function
     pub fn contains<A: Into<f64>>(&self, timestamp: A) -> bool {
         self.range().contains(&timestamp.into())
