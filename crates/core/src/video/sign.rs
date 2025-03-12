@@ -121,7 +121,7 @@ where
     I: KeyIdBound,
 {
     /// Creates a new object, with pos and size set to None (assuming they
-    /// will be defined later with [SignInfo::with_embedding])
+    /// will be defined later with [Self::with_embedding])
     pub fn new(start: Timestamp, signer: &'a SignerInfo<'a, K, I>, is_ref: bool) -> Self {
         Self {
             signer,
