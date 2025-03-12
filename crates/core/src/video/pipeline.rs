@@ -44,24 +44,6 @@ impl SignPipeline {
         pipeline.play()?;
         Ok(pipeline)
     }
-
-    /// This tries to create an iterator through all the frames in the pipeline
-    /// converting it to a given [VideoFrame] type.
-    ///
-    /// This does not consume the pipeline, instead opting to clone it
-    ///
-    /// Parts of this function was inspired by [`vid_frame_iter`](https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter)
-    pub fn try_iter(&self) -> Result<SampleIter, VideoError> {
-        let pipeline = SampleIter::new(self.pipe.clone());
-        pipeline.pause()?;
-
-        if let Some(skip_amount) = self.start_offset {
-            pipeline.seek_accurate(skip_amount)?;
-        }
-
-        pipeline.play()?;
-        Ok(pipeline)
-    }
 }
 
 #[cfg(any(feature = "verifying", feature = "signing"))]

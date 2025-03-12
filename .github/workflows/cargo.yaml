@@ -21,6 +21,8 @@ jobs:
 
       - name: Install stable toolchain
         uses: actions-rs/toolchain@v1
+        env:
+          RUSTFLAGS: "-D warnings"
         with:
           profile: minimal
           toolchain: stable
@@ -71,6 +73,14 @@ jobs:
           toolchain: stable
           override: true
           components: rustfmt, clippy
+
+      - name: Run cargo doc
+        uses: actions-rs/cargo@v1
+        env:
+          RUSTFLAGS: "-D warnings"
+        with:
+          command: doc
+          args: --all --no-deps
 
       - name: Run cargo fmt
         uses: actions-rs/cargo@v1

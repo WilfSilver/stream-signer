@@ -1,4 +1,4 @@
-//! Parts of this file is inspired by https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter
+//! Parts of this file is inspired by <https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter>
 
 use std::path::Path;
 
@@ -18,7 +18,7 @@ pub enum FramerateOption {
     Auto,
 }
 
-/// Enables building, signing and verifying videos outputing to a given [SignFile]
+/// Enables building, signing and verifying videos
 pub struct SignPipelineBuilder<'a> {
     pub src: ElementBuilder<'a>,
     pub convert: ElementBuilder<'a>,
