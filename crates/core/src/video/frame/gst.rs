@@ -16,8 +16,7 @@ impl Frame {
     }
 
     pub fn fps(&self) -> Framerate<usize> {
-        Framerate::default()
-        // self.0.info().fps().into()
+        self.0.info().fps().into()
     }
 
     pub fn width(&self) -> u32 {
