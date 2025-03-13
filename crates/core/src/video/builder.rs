@@ -25,7 +25,6 @@ pub struct SignPipelineBuilder<'a> {
     pub sink: ElementBuilder<'a>,
     pub extras: Result<Vec<Element>, glib::BoolError>,
     start_offset: Option<f64>,
-    pub fps: FramerateOption,
 }
 
 impl SignPipelineBuilder<'_> {
@@ -50,7 +49,6 @@ impl SignPipelineBuilder<'_> {
                 .property("drop", false),
             extras: Ok(vec![]),
             start_offset: None,
-            fps: FramerateOption::Fastest,
         }
     }
 
@@ -124,7 +122,6 @@ impl SignPipelineBuilder<'_> {
     /// * For a framerate of one per 3 seconds, use (1, 3).
     /// * For a framerate of 12.34 frames per second use (1234 / 100).
     pub fn with_frame_rate(mut self, fps: FramerateOption) -> Self {
-        self.fps = fps;
         match fps {
             FramerateOption::Fastest => self.sink = self.sink.property("sync", false),
             FramerateOption::Auto => self.sink = self.sink.property("sync", true),
@@ -148,10 +145,9 @@ impl SignPipelineBuilder<'_> {
     /// later
     pub fn build(self) -> Result<SignPipeline, VideoError> {
         let start = self.start_offset;
-        let fps = self.fps;
         let (pipe, sink) = self.build_raw_pipeline()?;
         // TODO: Pass sink name
-        Ok(SignPipeline::new(pipe, start, sink, fps))
+        Ok(SignPipeline::new(pipe, start, sink))
     }
 
     fn build_raw_pipeline(self) -> Result<(Pipeline, String), VideoError> {

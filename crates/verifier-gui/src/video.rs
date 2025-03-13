@@ -1,8 +1,6 @@
-use std::thread;
-
 use common_gui::video::VideoPlayer;
 use druid::{Data, Event, Lens, LifeCycle, LifeCycleCtx, Widget};
-use futures::{executor::block_on, StreamExt};
+use futures::StreamExt;
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use serde_json::json;
 use stream_signer::{gst, video::FramerateOption, SignFile, SignPipeline};
@@ -12,7 +10,7 @@ use testlibs::{
     issuer::TestIssuer,
 };
 
-use crate::state::AppData;
+use crate::state::{AppData, View};
 
 #[derive(Clone, Data, Default, Lens)]
 pub struct VideoOptions {
@@ -24,7 +22,7 @@ pub struct VerifyPlayer {}
 
 impl VideoPlayer<VideoOptions> for VerifyPlayer {
     fn spawn_player(&self, event_sink: druid::ExtEventSink, options: VideoOptions) {
-        thread::spawn(move || block_on(Self::watch_video(event_sink, options)));
+        tokio::spawn(Self::watch_video(event_sink, options));
     }
 }
 
@@ -83,6 +81,11 @@ impl VerifyPlayer {
             });
         })
         .await;
+
+        // TODO: Have a button to return to the main menu
+        event_sink.add_idle_callback(move |data: &mut AppData| {
+            data.view = View::MainMenu;
+        });
     }
 }
 

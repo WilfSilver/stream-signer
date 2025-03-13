@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::time::ONE_SECOND_MILLIS;
 
-use super::{sample_iter::SampleIter, FramerateOption, SignPipelineBuilder, VideoError};
+use super::{sample_iter::SampleIter, SignPipelineBuilder, VideoError};
 
 pub const MAX_CHUNK_LENGTH: usize = 10 * ONE_SECOND_MILLIS as usize;
 
@@ -14,21 +14,14 @@ pub struct SignPipeline {
     pipe: Pipeline,
     start_offset: Option<f64>,
     sink: String,
-    fps: FramerateOption,
 }
 
 impl SignPipeline {
-    pub fn new(
-        pipe: Pipeline,
-        start_offset: Option<f64>,
-        sink: String,
-        fps: FramerateOption,
-    ) -> Self {
+    pub fn new(pipe: Pipeline, start_offset: Option<f64>, sink: String) -> Self {
         Self {
             pipe,
             start_offset,
             sink,
-            fps,
         }
     }
 
@@ -46,7 +39,7 @@ impl SignPipeline {
     ///
     /// Parts of this function was inspired by [`vid_frame_iter`](https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter)
     pub fn try_into_iter(self) -> Result<SampleIter, VideoError> {
-        let pipeline = SampleIter::new(self.pipe);
+        let pipeline = SampleIter::new(self.pipe, &self.sink);
         pipeline.pause()?;
 
         if let Some(skip_amount) = self.start_offset {
@@ -65,6 +58,7 @@ mod either {
     use super::*;
 
     impl SignPipeline {
+        /// TODO: Refactor together to frame::Manager :)
         pub(super) fn frames_to_buffer<'a, I: Iterator<Item = &'a Frame>>(
             buf_len: usize,
             start_idx: usize,
@@ -86,11 +80,13 @@ mod either {
 
 #[cfg(feature = "verifying")]
 mod verifying {
+    use glib::object::{Cast, ObjectExt};
+    use gst::prelude::GstBinExt;
     use identity_iota::prelude::Resolver;
 
     use futures::{stream, Stream, StreamExt};
-    use std::pin::Pin;
     use std::sync::Arc;
+    use std::{pin::Pin, time::Instant};
 
     use crate::{
         video::{verify, Frame},
@@ -112,6 +108,8 @@ mod verifying {
             VideoError,
         > {
             let start_offset = self.start_offset;
+            let synced = self.set_clock_unsynced();
+
             let mut iter = self
                 .try_into_iter()?
                 .map(|r| r.map(Frame::from))
@@ -144,6 +142,7 @@ mod verifying {
                 .then(move |frame_state| {
                     let video_state = video_state.clone();
                     async move {
+                        let now = Instant::now();
                         let frame_manager =
                             match verify::FrameManager::new(video_state.clone(), frame_state).await
                             {
@@ -152,38 +151,58 @@ mod verifying {
                             };
 
                         let frame_state = frame_manager.frame_state.clone();
+                        let fps = frame_state.fps;
 
                         let signatures = frame_manager.verify_signatures().await;
 
-                        match signatures {
+                        let res = match signatures {
                             Ok(sigs) => Ok(Box::pin(VerifiedFrame {
                                 info: frame_state.into(),
                                 sigs,
                             })),
                             Err(e) => Err(e),
+                        };
+
+                        if synced {
+                            fps.sleep_for_rest(now.elapsed()).await;
                         }
+
+                        res
                     }
                 });
 
             Ok(res)
         }
+
+        /// Sets the `sync` property in the `sink` to be false so that we
+        /// go through the frames as fast as possible and returns the value
+        /// it was set to
+        fn set_clock_unsynced(&self) -> bool {
+            let appsink = self
+                .pipe
+                .by_name(&self.sink)
+                .expect("Sink element not found")
+                .downcast::<gst_app::AppSink>()
+                .expect("Sink element is expected to be an appsink!");
+            let sync = appsink.property("sync");
+            appsink.set_property("sync", false);
+
+            sync
+        }
     }
 }
 
 #[cfg(feature = "signing")]
-pub use signing::*;
-
-#[cfg(feature = "signing")]
 mod signing {
-    use futures::{future::join_all, stream, Stream, StreamExt};
+    use futures::{stream, Stream, StreamExt};
     use identity_iota::storage::JwkStorageDocumentError;
     use std::{
         collections::{HashMap, VecDeque},
-        future::Future,
         pin::Pin,
         sync::Arc,
     };
     use tokio::sync::Mutex;
+    use tokio::task::JoinSet;
 
     use crate::{
         file::{SignedChunk, Timestamp},
@@ -191,7 +210,7 @@ mod signing {
         video::{Frame, FrameInfo, Framerate},
     };
 
-    pub use super::super::{sign::ChunkSigner, KeyBound, KeyIdBound, SignerInfo};
+    pub use super::super::{sign::ChunkSigner, Signer};
     use super::*;
 
     impl SignPipeline {
@@ -215,8 +234,8 @@ mod signing {
         /// #
         /// # #[tokio::main]
         /// # async fn main() -> Result<(), Box<dyn Error>> {
-        /// use futures::TryStreamExt;
-        /// use stream_signer::{video::SignerInfo, SignPipeline, SignFile};
+        /// use std::sync::Arc;
+        /// use stream_signer::{video::Signer, SignPipeline, SignFile, TryStreamExt};
         ///
         /// stream_signer::gst::init()?;
         ///
@@ -240,14 +259,9 @@ mod signing {
         ///
         /// let pipeline = SignPipeline::build("https://example.com/video_feed").build()?;
         ///
-        /// let signer_info = SignerInfo {
-        ///     document: &identity.document,
-        ///     storage: &identity.storage,
-        ///     fragment: &identity.fragment,
-        ///     presentation,
-        /// };
+        /// let signer = Arc::new(identity);
         ///
-        /// let sign_file = pipeline.sign_chunks(100, &signer_info)
+        /// let sign_file = pipeline.sign_chunks(100, signer)
         ///     .expect("Failed to start stream")
         ///     .try_collect::<SignFile>()
         ///     .await
@@ -259,15 +273,11 @@ mod signing {
         /// # }
         /// ```
         ///
-        pub fn sign_chunks<'a, T: Into<Timestamp>, K, I>(
+        pub fn sign_chunks<T: Into<Timestamp>, S: Signer + 'static>(
             self,
             length: T,
-            signer: &'a SignerInfo<'a, K, I>,
-        ) -> Result<impl Stream<Item = Result<SignedChunk, VideoError>> + 'a, VideoError>
-        where
-            K: KeyBound + Sync,
-            I: KeyIdBound + Sync,
-        {
+            signer: Arc<S>,
+        ) -> Result<impl Stream<Item = Result<SignedChunk, VideoError>>, VideoError> {
             let length = length.into();
             let mut is_start = true;
 
@@ -275,7 +285,7 @@ mod signing {
                 if !info.time.is_start() && info.time % length == 0 {
                     let res = vec![ChunkSigner::new(
                         info.time.start() - length,
-                        signer,
+                        signer.clone(),
                         !is_start,
                     )];
                     is_start = false;
@@ -310,8 +320,8 @@ mod signing {
         /// #
         /// # #[tokio::main]
         /// # async fn main() -> Result<(), Box<dyn Error>> {
-        /// use futures::TryStreamExt;
-        /// use stream_signer::{video::{ChunkSigner, SignerInfo}, SignPipeline, SignFile};
+        /// use std::sync::Arc;
+        /// use stream_signer::{video::{ChunkSigner, Signer}, SignPipeline, SignFile, TryStreamExt};
         ///
         /// stream_signer::gst::init()?;
         ///
@@ -335,19 +345,14 @@ mod signing {
         ///
         /// let pipeline = SignPipeline::build("https://example.com/video_feed").build()?;
         ///
-        /// let signer_info = SignerInfo {
-        ///     document: &identity.document,
-        ///     storage: &identity.storage,
-        ///     fragment: &identity.fragment,
-        ///     presentation,
-        /// };
+        /// let signer = Arc::new(identity);
         ///
         /// let mut is_first = true;
         /// let sign_file = pipeline.sign(|info| {
         ///   // ...
         ///   if !info.time.is_start() && info.time.multiple_of(100) {
         ///     let res = vec![
-        ///       ChunkSigner::new(info.time.start() - 100, &signer_info, is_first),
+        ///       ChunkSigner::new(info.time.start() - 100, signer.clone(), is_first),
         ///     ];
         ///     is_first = false;
         ///     res
@@ -366,15 +371,14 @@ mod signing {
         /// # }
         /// ```
         /// TODO: Improve errors
-        pub fn sign<'a, K, I, F, ITER>(
+        pub fn sign<S, F, ITER>(
             self,
             sign_with: F,
-        ) -> Result<impl Stream<Item = Result<SignedChunk, VideoError>> + 'a, VideoError>
+        ) -> Result<impl Stream<Item = Result<SignedChunk, VideoError>>, VideoError>
         where
-            K: KeyBound + 'a + Sync,
-            I: KeyIdBound + 'a + Sync,
-            F: FnMut(FrameInfo) -> ITER + Send + 'a,
-            ITER: IntoIterator<Item = ChunkSigner<'a, K, I>>,
+            S: Signer + 'static,
+            F: FnMut(FrameInfo) -> ITER,
+            ITER: IntoIterator<Item = ChunkSigner<S>>,
         {
             let start_offset = self.start_offset;
 
@@ -406,7 +410,7 @@ mod signing {
                             Ok(f) => f,
                             Err(e) => {
                                 return Box::pin(stream::iter([Err(e.into())]))
-                                    as Pin<Box<dyn Stream<Item = _>>>
+                                    as Pin<Box<dyn Stream<Item = _> + Send>>
                             }
                         };
 
@@ -427,9 +431,9 @@ mod signing {
                         buffer.push_back(frame);
 
                         type SigInfoReturn = Result<SignatureInfo, JwkStorageDocumentError>;
-                        type FutureSigInfo<'b> = Pin<Box<dyn Future<Output = SigInfoReturn> + 'b>>;
 
-                        let mut chunks: HashMap<Timestamp, Vec<FutureSigInfo>> = HashMap::new();
+                        let mut chunks: HashMap<Timestamp, JoinSet<SigInfoReturn>> = HashMap::new();
+                        // let mut chunks: HashMap<Timestamp, JoinSet<SigInfoReturn>> = HashMap::new();
                         for si in sign_info.into_iter() {
                             // TODO: Add protections if the timeframe is too short/long
                             let start = si.start;
@@ -460,18 +464,22 @@ mod signing {
                                 buffer.range(start_idx..buffer.len()),
                             );
 
-                            let fut = Box::pin(si.sign(frames_buf, size));
+                            let fut = si.sign(frames_buf, size);
 
                             match chunks.get_mut(&start) {
-                                Some(c) => c.push(fut),
+                                Some(c) => {
+                                    c.spawn(fut);
+                                }
                                 None => {
-                                    chunks.insert(start, vec![fut]);
+                                    let mut sigs = JoinSet::new();
+                                    sigs.spawn(fut);
+                                    chunks.insert(start, sigs);
                                 }
                             }
                         }
 
                         let res = stream::iter(chunks).then(move |(start, futures)| async move {
-                            join_all(futures).await.into_iter().try_fold(
+                            futures.join_all().await.into_iter().try_fold(
                                 SignedChunk::new(start, timestamp, vec![]),
                                 |mut curr, signature| match signature {
                                     Ok(sig) => {
@@ -511,7 +519,7 @@ mod tests {
     use futures::{future, StreamExt, TryStreamExt};
     use identity_iota::{core::FromJson, credential::Subject, did::DID};
     use serde_json::json;
-    use std::error::Error;
+    use std::{error::Error, sync::Arc};
     use testlibs::{
         client::{get_client, get_resolver},
         identity::TestIdentity,
@@ -521,10 +529,7 @@ mod tests {
 
     use super::*;
 
-    use crate::{
-        video::{verify::SignatureState, GenSignerInfo},
-        SignFile,
-    };
+    use crate::{video::verify::SignatureState, SignFile};
 
     #[tokio::test]
     async fn sign_and_verify() -> Result<(), Box<dyn Error>> {
@@ -553,7 +558,7 @@ mod tests {
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
         let signfile = pipe
-            .sign_chunks(100, &identity.gen_signer_info()?)?
+            .sign_chunks(100, Arc::new(identity))?
             .try_collect::<SignFile>()
             .await?;
 

@@ -1,6 +1,7 @@
 use std::{collections::HashMap, future::Future, sync::Arc};
 
-use futures::{stream, Stream, StreamExt};
+use futures::StreamExt;
+use futures::{stream, Stream};
 use identity_eddsa_verifier::EdDSAJwsVerifier;
 use identity_iota::{
     core::SingleStructError,
@@ -194,12 +195,13 @@ impl<'a> FrameManager<'a> {
     }
 }
 
+type FrameIdxPair = (usize, Result<Frame, glib::Error>);
 pub(crate) struct FrameState {
     pub idx: usize,
     pub frame: Frame,
     pub timestamp: Timestamp,
     pub fps: Framerate<usize>,
-    pub next_frames: Box<[Arc<(usize, Result<Frame, glib::Error>)>]>,
+    pub next_frames: Box<[Arc<FrameIdxPair>]>,
 }
 
 impl FrameState {

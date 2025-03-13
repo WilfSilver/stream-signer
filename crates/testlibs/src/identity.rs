@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use identity_iota::{
     core::Url,
@@ -8,6 +10,7 @@ use identity_iota::{
 };
 use iota_sdk::client::secret::SecretManager;
 use rand::distr::SampleString;
+use tokio::sync::Mutex;
 
 use super::{
     did,
@@ -16,7 +19,7 @@ use super::{
 
 pub struct TestIdentity {
     pub manager: SecretManager,
-    pub storage: MemStorage,
+    pub storage: Arc<Mutex<MemStorage>>,
     pub credential: Credential,
     pub jwt: Jwt,
     pub document: CoreDocument,
@@ -29,7 +32,7 @@ impl TestIdentity {
         F: Fn(&CoreDID) -> Subject,
     {
         let manager: SecretManager = did::get_secret_manager()?;
-        let storage: MemStorage = MemStorage::new(JwkMemStore::new(), KeyIdMemstore::new());
+        let storage = MemStorage::new(JwkMemStore::new(), KeyIdMemstore::new());
 
         let (_, document, fragment) = issuer.create_did(&manager, &storage).await?;
 
@@ -48,7 +51,7 @@ impl TestIdentity {
         Ok(Self {
             credential,
             manager,
-            storage,
+            storage: Arc::new(Mutex::new(storage)),
             document,
             fragment,
             jwt,

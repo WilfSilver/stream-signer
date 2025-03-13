@@ -14,3 +14,4 @@ serde_json = "1.0.140"
 stream-signer = { path = "../core", default-features = false, features = ["signing", "withtestlibs"] }
 common-gui = { path = "../common-gui" }
 testlibs = { path = "../testlibs" }
+tokio = "1.43.0"

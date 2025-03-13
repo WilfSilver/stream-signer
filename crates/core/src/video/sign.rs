@@ -1,11 +1,13 @@
+use std::{future::Future, sync::Arc};
+
 use identity_iota::{
-    credential::{Jwt, JwtPresentationOptions, Presentation},
+    credential::Jwt,
     document::CoreDocument,
     storage::{
-        JwkDocumentExt, JwkStorage, JwkStorageDocumentError, JwsSignatureOptions, KeyIdStorage,
-        MethodDigest, Storage,
+        JwkStorage, JwkStorageDocumentError, KeyId, KeyIdStorage, KeyIdStorageResult,
+        KeyStorageResult, MethodDigest,
     },
-    verification::MethodData,
+    verification::{jwk::Jwk, MethodData},
 };
 
 use crate::spec::{Coord, PresentationOrId, PresentationReference, SignatureInfo};
@@ -17,83 +19,65 @@ impl<T: JwkStorage> KeyBound for T {}
 pub trait KeyIdBound: KeyIdStorage {}
 impl<T: KeyIdStorage> KeyIdBound for T {}
 
-pub struct SignerInfo<'a, K, I>
-where
-    K: KeyBound,
-    I: KeyIdBound,
-{
-    pub document: &'a CoreDocument,
-    pub presentation: Presentation<Jwt>,
-    pub storage: &'a Storage<K, I>,
-    pub fragment: &'a str,
-}
+pub trait Signer: Sync + Send {
+    fn presentation(&self) -> impl Future<Output = Result<Jwt, JwkStorageDocumentError>> + Send;
 
-impl<K, I> SignerInfo<'_, K, I>
-where
-    K: KeyBound,
-    I: KeyIdBound,
-{
-    async fn create_def(&self) -> Result<PresentationDefinition, JwkStorageDocumentError> {
-        let jwt = self
-            .document
-            .create_presentation_jwt(
-                &self.presentation,
-                self.storage,
-                self.fragment,
-                &JwsSignatureOptions::default(),
-                &JwtPresentationOptions::default(),
-            )
-            .await?;
+    fn document(&self) -> &CoreDocument;
+    fn fragment(&self) -> &str;
 
-        Ok(PresentationDefinition {
-            id: self.gen_id(),
-            pres: jwt,
-        })
+    fn get_key_id(
+        &self,
+        digest: &MethodDigest,
+    ) -> impl Future<Output = KeyIdStorageResult<KeyId>> + Send;
+
+    fn get_presentation_id(&self) -> String {
+        self.document().id().to_string()
     }
 
-    fn create_ref(&self) -> PresentationReference {
-        PresentationReference { id: self.gen_id() }
-    }
+    fn sign_with_key(
+        &self,
+        key_id: &KeyId,
+        msg: &[u8],
+        public_key: &Jwk,
+    ) -> impl Future<Output = KeyStorageResult<Vec<u8>>> + Send;
 
-    fn gen_id(&self) -> String {
-        "test".to_string()
-    }
+    fn sign(
+        &self,
+        msg: &[u8],
+    ) -> impl Future<Output = Result<Vec<u8>, JwkStorageDocumentError>> + Send {
+        async {
+            // Obtain the method corresponding to the given fragment.
 
-    async fn sign(&self, msg: &[u8]) -> Result<Vec<u8>, JwkStorageDocumentError> {
-        // Obtain the method corresponding to the given fragment.
+            let method = self
+                .document()
+                .resolve_method(self.fragment(), None)
+                .ok_or(JwkStorageDocumentError::MethodNotFound)?;
+            let MethodData::PublicKeyJwk(ref jwk) = method.data() else {
+                return Err(JwkStorageDocumentError::NotPublicKeyJwk);
+            };
 
-        let method = self
-            .document
-            .resolve_method(self.fragment, None)
-            .ok_or(JwkStorageDocumentError::MethodNotFound)?;
-        let MethodData::PublicKeyJwk(ref jwk) = method.data() else {
-            return Err(JwkStorageDocumentError::NotPublicKeyJwk);
-        };
+            // Get the key identifier corresponding to the given method from the KeyId storage.
+            let method_digest = MethodDigest::new(method)
+                .map_err(JwkStorageDocumentError::MethodDigestConstructionError)?;
+            let key_id = self
+                .get_key_id(&method_digest)
+                .await
+                .map_err(JwkStorageDocumentError::KeyIdStorageError)?;
 
-        // Get the key identifier corresponding to the given method from the KeyId storage.
-        let method_digest = MethodDigest::new(method)
-            .map_err(JwkStorageDocumentError::MethodDigestConstructionError)?;
-        let key_id = <I as KeyIdStorage>::get_key_id(self.storage.key_id_storage(), &method_digest)
-            .await
-            .map_err(JwkStorageDocumentError::KeyIdStorageError)?;
+            let signature = self
+                .sign_with_key(&key_id, msg, jwk)
+                .await
+                .map_err(JwkStorageDocumentError::KeyStorageError)?;
 
-        // TODO: This is really slow (takes about 1 second to sign a 100ms chunk)
-        let signature = <K as JwkStorage>::sign(self.storage.key_storage(), &key_id, msg, jwk)
-            .await
-            .map_err(JwkStorageDocumentError::KeyStorageError)?;
-
-        Ok(signature)
+            Ok(signature)
+        }
     }
 }
-
 /// Stores the information necessary to sign a given second of a video, here
 /// note that the end time is implied at when you give this information to the
 /// signing algorithm
-pub struct ChunkSigner<'a, K, I>
-where
-    K: KeyBound,
-    I: KeyIdBound,
-{
+#[derive(Debug)]
+pub struct ChunkSigner<S: Signer> {
     /// The position of the embedding, if not given, we will assume the top
     /// right
     ///
@@ -102,7 +86,7 @@ where
 
     /// The given information to prove your credability as well as the
     /// information to create any signatures
-    pub signer: &'a SignerInfo<'a, K, I>,
+    pub signer: Arc<S>,
 
     /// The size of the embedding, if not given, we will assume the size of
     /// the window.
@@ -115,14 +99,10 @@ where
     pub is_ref: bool,
 }
 
-impl<'a, K, I> ChunkSigner<'a, K, I>
-where
-    K: KeyBound,
-    I: KeyIdBound,
-{
+impl<S: Signer> ChunkSigner<S> {
     /// Creates a new object, with pos and size set to None (assuming they
     /// will be defined later with [Self::with_embedding])
-    pub fn new(start: Timestamp, signer: &'a SignerInfo<'a, K, I>, is_ref: bool) -> Self {
+    pub fn new(start: Timestamp, signer: Arc<S>, is_ref: bool) -> Self {
         Self {
             signer,
             pos: None,
@@ -147,12 +127,21 @@ where
         msg: Vec<u8>,
         size: Coord,
     ) -> Result<SignatureInfo, JwkStorageDocumentError> {
-        let signature = self.signer.sign(&msg).await?;
         let presentation: PresentationOrId = if self.is_ref {
-            self.signer.create_ref().into()
+            PresentationReference {
+                id: self.signer.get_presentation_id(),
+            }
+            .into()
         } else {
-            self.signer.create_def().await?.into()
+            let jwt = self.signer.presentation().await?;
+            PresentationDefinition {
+                id: self.signer.get_presentation_id(),
+                pres: jwt,
+            }
+            .into()
         };
+
+        let signature = self.signer.sign(&msg).await?;
 
         Ok(SignatureInfo {
             pos: self.pos.unwrap_or_default(),
@@ -163,27 +152,74 @@ where
     }
 }
 
-#[cfg(any(test, feature = "testlibs"))]
-pub use testlib_extras::*;
+impl<S: Signer> Clone for ChunkSigner<S> {
+    fn clone(&self) -> Self {
+        Self {
+            signer: self.signer.clone(),
+            pos: self.pos,
+            size: self.size,
+            start: self.start,
+            is_ref: self.is_ref,
+        }
+    }
+}
 
 #[cfg(any(test, feature = "testlibs"))]
 mod testlib_extras {
     use super::*;
-    use identity_iota::storage::{JwkMemStore, KeyIdMemstore};
-    use testlibs::anyhow;
+    use identity_iota::{
+        credential::JwtPresentationOptions,
+        storage::{JwkDocumentExt, JwsSignatureOptions},
+    };
     use testlibs::identity::TestIdentity;
 
-    pub trait GenSignerInfo {
-        fn gen_signer_info(&self) -> anyhow::Result<SignerInfo<'_, JwkMemStore, KeyIdMemstore>>;
-    }
-    impl GenSignerInfo for TestIdentity {
-        fn gen_signer_info(&self) -> anyhow::Result<SignerInfo<'_, JwkMemStore, KeyIdMemstore>> {
-            Ok(SignerInfo {
-                document: &self.document,
-                presentation: self.build_presentation()?,
-                storage: &self.storage,
-                fragment: &self.fragment,
-            })
+    impl Signer for TestIdentity {
+        fn document(&self) -> &CoreDocument {
+            &self.document
+        }
+
+        fn fragment(&self) -> &str {
+            &self.fragment
+        }
+
+        async fn get_key_id(&self, digest: &MethodDigest) -> KeyIdStorageResult<KeyId> {
+            self.storage
+                .lock()
+                .await
+                .key_id_storage()
+                .get_key_id(digest)
+                .await
+        }
+
+        async fn sign_with_key(
+            &self,
+            key_id: &KeyId,
+            msg: &[u8],
+            public_key: &Jwk,
+        ) -> KeyStorageResult<Vec<u8>> {
+            self.storage
+                .lock()
+                .await
+                .key_storage()
+                .sign(key_id, msg, public_key)
+                .await
+        }
+
+        async fn presentation(&self) -> Result<Jwt, JwkStorageDocumentError> {
+            let pres = self
+                .build_presentation()
+                .map_err(|_| JwkStorageDocumentError::JwpBuildingError)?;
+
+            let storage = self.storage.lock().await;
+            self.document
+                .create_presentation_jwt(
+                    &pres,
+                    &storage,
+                    &self.fragment,
+                    &JwsSignatureOptions::default(),
+                    &JwtPresentationOptions::default(),
+                )
+                .await
         }
     }
 }
