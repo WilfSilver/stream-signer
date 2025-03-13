@@ -9,7 +9,7 @@ use gst::{
     Element, ElementFactory, Pipeline,
 };
 
-use super::{SignPipeline, VideoError};
+use super::SignPipeline;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub enum FramerateOption {
@@ -17,6 +17,8 @@ pub enum FramerateOption {
     Fastest,
     Auto,
 }
+
+pub type BuilderError = glib::BoolError;
 
 /// Enables building, signing and verifying videos
 pub struct SignPipelineBuilder<'a> {
@@ -143,14 +145,14 @@ impl SignPipelineBuilder<'_> {
 
     /// Puts all the arguments into the [SignPipeline] object to then be used
     /// later
-    pub fn build(self) -> Result<SignPipeline, VideoError> {
+    pub fn build(self) -> Result<SignPipeline, BuilderError> {
         let start = self.start_offset;
         let (pipe, sink) = self.build_raw_pipeline()?;
         // TODO: Pass sink name
         Ok(SignPipeline::new(pipe, start, sink))
     }
 
-    fn build_raw_pipeline(self) -> Result<(Pipeline, String), VideoError> {
+    fn build_raw_pipeline(self) -> Result<(Pipeline, String), BuilderError> {
         // Create the pipeline and add elements
         let src = self.src.build()?;
         let convert = self.convert.build()?;

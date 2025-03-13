@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::time::ONE_SECOND_MILLIS;
 
-use super::{sample_iter::SampleIter, SignPipelineBuilder, VideoError};
+use super::{sample_iter::SampleIter, SignPipelineBuilder, StreamError};
 
 pub const MAX_CHUNK_LENGTH: usize = 10 * ONE_SECOND_MILLIS as usize;
 
@@ -38,7 +38,7 @@ impl SignPipeline {
     /// frame with the given [gst::Sample] type.
     ///
     /// Parts of this function was inspired by [`vid_frame_iter`](https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter)
-    pub fn try_into_iter(self) -> Result<SampleIter, VideoError> {
+    pub fn try_into_iter(self) -> Result<SampleIter, StreamError> {
         let pipeline = SampleIter::new(self.pipe, &self.sink);
         pipeline.pause()?;
 
@@ -88,6 +88,7 @@ mod verifying {
     use std::sync::Arc;
     use std::{pin::Pin, time::Instant};
 
+    use crate::video::FrameError;
     use crate::{
         video::{verify, Frame},
         SignFile,
@@ -102,10 +103,9 @@ mod verifying {
             self,
             resolver: Resolver,
             signfile: &SignFile,
-            // TODO: Change to FrameError (separating VideoError + FrameError)
         ) -> Result<
-            impl Stream<Item = Result<Pin<Box<VerifiedFrame>>, VideoError>> + use<'_>,
-            VideoError,
+            impl Stream<Item = Result<Pin<Box<VerifiedFrame>>, FrameError>> + use<'_>,
+            StreamError,
         > {
             let start_offset = self.start_offset;
             let synced = self.set_clock_unsynced();
@@ -207,7 +207,7 @@ mod signing {
     use crate::{
         file::{SignedChunk, Timestamp},
         spec::{Coord, SignatureInfo},
-        video::{Frame, FrameInfo, Framerate},
+        video::{Frame, FrameError, FrameInfo, Framerate},
     };
 
     pub use super::super::{sign::ChunkSigner, Signer};
@@ -277,7 +277,7 @@ mod signing {
             self,
             length: T,
             signer: Arc<S>,
-        ) -> Result<impl Stream<Item = Result<SignedChunk, VideoError>>, VideoError> {
+        ) -> Result<impl Stream<Item = Result<SignedChunk, FrameError>>, StreamError> {
             let length = length.into();
             let mut is_start = true;
 
@@ -370,11 +370,10 @@ mod signing {
         /// # Ok(())
         /// # }
         /// ```
-        /// TODO: Improve errors
         pub fn sign<S, F, ITER>(
             self,
             sign_with: F,
-        ) -> Result<impl Stream<Item = Result<SignedChunk, VideoError>>, VideoError>
+        ) -> Result<impl Stream<Item = Result<SignedChunk, FrameError>>, StreamError>
         where
             S: Signer + 'static,
             F: FnMut(FrameInfo) -> ITER,
@@ -433,7 +432,6 @@ mod signing {
                         type SigInfoReturn = Result<SignatureInfo, JwkStorageDocumentError>;
 
                         let mut chunks: HashMap<Timestamp, JoinSet<SigInfoReturn>> = HashMap::new();
-                        // let mut chunks: HashMap<Timestamp, JoinSet<SigInfoReturn>> = HashMap::new();
                         for si in sign_info.into_iter() {
                             // TODO: Add protections if the timeframe is too short/long
                             let start = si.start;
@@ -507,10 +505,10 @@ mod signing {
         start: Timestamp,
         at: Timestamp,
         i: usize,
-    ) -> Result<usize, VideoError> {
+    ) -> Result<usize, FrameError> {
         buf_len
             .checked_sub(i - excess - start.into_frames(fps, start_offset))
-            .ok_or(VideoError::OutOfRange(start, at))
+            .ok_or(FrameError::OutOfRange(start, at))
     }
 }
 

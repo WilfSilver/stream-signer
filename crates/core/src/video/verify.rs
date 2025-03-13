@@ -19,7 +19,7 @@ use crate::{
     file::Timestamp, spec::Coord, CredentialStore, SignFile, Signer, SignerState, UnknownKey,
 };
 
-use super::{Frame, FrameInfo, Framerate, VideoError};
+use super::{Frame, FrameError, FrameInfo, Framerate};
 
 #[derive(Debug, Clone)]
 pub struct UnverifiedSignature {
@@ -112,7 +112,7 @@ impl<'a> FrameManager<'a> {
     pub async fn new(
         video_state: Arc<VideoState<'a>>,
         frame_state: FrameStateInfo,
-    ) -> Result<Self, VideoError> {
+    ) -> Result<Self, FrameError> {
         let offset = video_state.start_offset;
 
         Ok(Self {
@@ -121,7 +121,7 @@ impl<'a> FrameManager<'a> {
         })
     }
 
-    pub async fn verify_signatures(self) -> Result<Vec<SignatureState>, VideoError> {
+    pub async fn verify_signatures(self) -> Result<Vec<SignatureState>, FrameError> {
         self.sigs_iter()
             .fold(Ok(vec![]), |state, info| async {
                 let Ok(mut state) = state else {
@@ -139,7 +139,7 @@ impl<'a> FrameManager<'a> {
 
     fn sigs_iter(
         self,
-    ) -> impl Stream<Item = impl Future<Output = Result<SignatureState, VideoError>> + 'a> + 'a
+    ) -> impl Stream<Item = impl Future<Output = Result<SignatureState, FrameError>> + 'a> + 'a
     {
         let sigs = self
             .video_state
@@ -208,7 +208,7 @@ impl FrameState {
     pub fn new(
         (i, frame, next_frames): FrameStateInfo,
         offset: Option<f64>,
-    ) -> Result<Self, VideoError> {
+    ) -> Result<Self, FrameError> {
         let frame: Frame = match &frame.1 {
             Ok(f) => f.clone(),
             Err(e) => return Err(e.clone().into()),
