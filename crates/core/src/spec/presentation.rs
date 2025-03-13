@@ -32,3 +32,11 @@ pub struct PresentationDefinition {
     pub id: String,
     pub pres: Jwt,
 }
+
+impl PresentationDefinition {
+    pub fn get_ref(&self) -> PresentationReference {
+        PresentationReference {
+            id: self.id.clone(),
+        }
+    }
+}

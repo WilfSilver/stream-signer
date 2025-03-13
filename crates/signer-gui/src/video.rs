@@ -1,25 +1,17 @@
-use std::{
-    sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
-        Arc,
-    },
-    thread,
+use std::sync::{
+    atomic::{AtomicBool, AtomicU32, Ordering},
+    Arc,
 };
 
 use common_gui::{state::VideoState, video::VideoPlayer};
 use druid::{Code, Color, Data, Event, Lens, LifeCycle, LifeCycleCtx, RenderContext, Widget};
-use futures::{executor::block_on, TryStreamExt};
-use identity_iota::{
-    core::FromJson,
-    credential::Subject,
-    did::DID,
-    storage::{JwkMemStore, KeyIdMemstore},
-};
+use futures::TryStreamExt;
+use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use serde_json::json;
 use stream_signer::{
     file::Timestamp,
     gst,
-    video::{ChunkSigner, FramerateOption, GenSignerInfo, MAX_CHUNK_LENGTH},
+    video::{ChunkSigner, FramerateOption, MAX_CHUNK_LENGTH},
     SignFile, SignPipeline,
 };
 use testlibs::{client::get_client, identity::TestIdentity, issuer::TestIssuer};
@@ -79,15 +71,13 @@ impl SignPlayer {
             .build()
             .expect("Failed to build pipeline");
 
-        let signer = identity
-            .gen_signer_info()
-            .expect("Failed to gen signer info");
+        let signer = Arc::new(identity);
 
         // Cache of the last sign, also stored in the AtomicU32 (but stored as
         // timestamp)
         let mut last_sign: Timestamp = 0.into();
         let signfile = pipe
-            .sign::<JwkMemStore, KeyIdMemstore, _, _>(|info| {
+            .sign(|info| {
                 let time = info.time;
 
                 event_sink.add_idle_callback(move |data: &mut AppData| {
@@ -100,7 +90,11 @@ impl SignPlayer {
                 if sign_last_chunk.0.load(Ordering::Relaxed)
                     || next_frame_time >= MAX_CHUNK_LENGTH as f64
                 {
-                    let res = vec![ChunkSigner::new(last_sign, &signer, last_sign == 0.into())];
+                    let res = vec![ChunkSigner::new(
+                        last_sign,
+                        signer.clone(),
+                        last_sign == 0.into(),
+                    )];
 
                     sign_last_chunk.0.store(false, Ordering::Relaxed);
                     last_sign = time.start();
@@ -131,7 +125,7 @@ type State = VideoState<VideoOptions>;
 impl VideoPlayer<State> for SignPlayer {
     fn spawn_player(&self, event_sink: druid::ExtEventSink, state: State) {
         let sign_info = self.sign_info.clone();
-        thread::spawn(move || block_on(Self::watch_video(event_sink, sign_info, state.options)));
+        tokio::spawn(Self::watch_video(event_sink, sign_info, state.options));
     }
 }
 

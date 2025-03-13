@@ -7,7 +7,8 @@ mod video;
 use druid::{AppLauncher, WindowDesc};
 use state::{AppData, Delegate};
 
-pub fn main() {
+#[tokio::main]
+pub async fn main() {
     let window = WindowDesc::new(app::make_ui()).title("Video Signer");
 
     let launcher = AppLauncher::with_window(window);

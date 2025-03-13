@@ -27,13 +27,11 @@ pub struct SampleIter {
 }
 
 impl SampleIter {
-    pub fn new(pipeline: gst::Pipeline) -> Self {
-        let sink = "sink".to_string();
-
+    pub fn new<S: ToString>(pipeline: gst::Pipeline, sink: S) -> Self {
         Self {
             pipeline,
             timeout: 30 * gst::ClockTime::SECOND,
-            sink,
+            sink: sink.to_string(),
             fused: false,
         }
     }

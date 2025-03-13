@@ -4,6 +4,7 @@ use std::{
 };
 
 use num_traits::NumCast;
+use tokio::time::{self, Duration, Sleep};
 
 use crate::time::ONE_SECOND_MILLIS;
 
@@ -76,6 +77,20 @@ where
     #[inline]
     pub fn convert_to_frames(&self, milli: T) -> usize {
         <usize as NumCast>::from(milli * self.frames() / self.milliseconds()).unwrap()
+    }
+}
+
+impl Framerate<usize> {
+    pub fn frame_time(&self) -> Duration {
+        Duration::from_secs(self.seconds() as u64).div(self.frames() as u32)
+    }
+
+    /// Sleeps for the remainder of the time a frame should be shown, with
+    /// the `taken` being the current time used within the frame
+    #[inline]
+    pub fn sleep_for_rest(&self, taken: Duration) -> Sleep {
+        // sleep(self.frame_time().checked_sub(taken).unwrap_or_default())
+        time::sleep(self.frame_time().checked_sub(taken).unwrap_or_default())
     }
 }
 
