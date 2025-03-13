@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::time::ONE_SECOND_MILLIS;
 
-use super::{sample_iter::SampleIter, SignPipelineBuilder, VideoError};
+use super::{sample_iter::SampleIter, FramerateOption, SignPipelineBuilder, VideoError};
 
 pub const MAX_CHUNK_LENGTH: usize = 10 * ONE_SECOND_MILLIS as usize;
 
@@ -13,11 +13,23 @@ pub const MAX_CHUNK_LENGTH: usize = 10 * ONE_SECOND_MILLIS as usize;
 pub struct SignPipeline {
     pipe: Pipeline,
     start_offset: Option<f64>,
+    sink: String,
+    fps: FramerateOption,
 }
 
 impl SignPipeline {
-    pub fn new(pipe: Pipeline, start_offset: Option<f64>) -> Self {
-        Self { pipe, start_offset }
+    pub fn new(
+        pipe: Pipeline,
+        start_offset: Option<f64>,
+        sink: String,
+        fps: FramerateOption,
+    ) -> Self {
+        Self {
+            pipe,
+            start_offset,
+            sink,
+            fps,
+        }
     }
 
     /// Uses the builder API to create a Pipeline
@@ -77,28 +89,19 @@ mod verifying {
     use identity_iota::prelude::Resolver;
 
     use futures::{stream, Stream, StreamExt};
-    use identity_iota::verification::jws::{JwsAlgorithm, VerificationInput};
-    use std::collections::HashMap;
     use std::pin::Pin;
     use std::sync::Arc;
-    use tokio::sync::Mutex;
 
     use crate::{
-        file::Timestamp,
-        spec::Coord,
-        video::{Frame, FrameInfo},
-        CredentialStore, SignFile,
+        video::{verify, Frame},
+        SignFile,
     };
 
-    use super::super::{
-        verify::{SignatureState, VerifiedFrame},
-        Delayed, DelayedStream,
-    };
+    use super::super::{verify::VerifiedFrame, Delayed, DelayedStream};
     use super::*;
 
     impl SignPipeline {
         // TODO: Write documentation :)
-        // TODO: Split into mutliple functions?
         pub fn verify(
             self,
             resolver: Resolver,
@@ -127,13 +130,10 @@ mod verifying {
 
             let delayed = DelayedStream::<_, _>::new(buf_capacity, stream::iter(iter));
 
-            type SigID<'a> = (Timestamp, &'a Vec<u8>);
-            type SigCache<'a> = HashMap<SigID<'a>, SignatureState>;
-            let state_cache: Arc<Mutex<SigCache>> = Arc::new(Mutex::new(HashMap::new()));
+            let video_state = Arc::new(verify::VideoState::new(signfile, start_offset, resolver));
 
             // TODO: THERE ARE WAYYY TOO MANY CLONES AHHHH
             // TODO: This must be passed in
-            let credentials = Arc::new(Mutex::new(CredentialStore::new(resolver)));
             let res = delayed
                 .filter_map(|d_info| async {
                     match d_info {
@@ -141,107 +141,23 @@ mod verifying {
                         Delayed::Full(a, fut) => Some((a.0, a, fut)),
                     }
                 })
-                .then(move |(i, frame, buffer)| {
-                    let credentials = credentials.clone();
-                    let state_cache = state_cache.clone();
+                .then(move |frame_state| {
+                    let video_state = video_state.clone();
                     async move {
-                        let frame: Frame = match &frame.1 {
-                            Ok(f) => f.clone(),
-                            Err(e) => return Err(e.clone().into()),
-                        };
+                        let frame_manager =
+                            match verify::FrameManager::new(video_state.clone(), frame_state).await
+                            {
+                                Ok(m) => m,
+                                Err(e) => return Err(e),
+                            };
 
-                        let size = Coord::new(frame.width(), frame.height());
+                        let frame_state = frame_manager.frame_state.clone();
 
-                        let (timestamp, _) = Timestamp::from_frames(i, frame.fps(), start_offset);
-
-                        let buf_ref = &buffer;
-                        let fps = frame.fps();
-
-                        let sigs_iter =
-                            stream::iter(signfile.get_signatures_at(timestamp)).map(|sig| {
-                                let credentials = credentials.clone();
-                                let state_cache = state_cache.clone();
-                                let frame_ref = &frame;
-                                async move {
-                                    let start = sig.range.start;
-                                    let end = sig.range.end;
-                                    let sig = sig.signature;
-                                    let cache_key = (start, &sig.signature);
-
-                                    let mut state_cache = state_cache.lock().await;
-
-                                    // Due to us having to pass to the output of the iterator
-                                    let state = match state_cache.get(&cache_key) {
-                                        Some(s) => s.clone(),
-                                        None => {
-                                            // If there is nothing in the cache we
-                                            // will assume this is the first frame
-                                            // for which it is signed for
-                                            let start_frame = 0;
-
-                                            // TODO: Check if the end frame is after 10 second mark
-                                            let end_frame = end.into_frames(fps, start_offset)
-                                                - start.into_frames(fps, start_offset);
-
-                                            let frames_buf = Self::frames_to_buffer(
-                                                buf_ref.len(),
-                                                start_frame,
-                                                size,
-                                                // TODO: Investigate why its end_frame - 1
-                                                vec![frame_ref].into_iter().chain(
-                                                    buf_ref[0..end_frame - 1].iter().map(|a| {
-                                                        // TODO: Check this
-                                                        // It is safe to unwrap here due to the previous
-                                                        // checks on the frames
-                                                        let res = a.1.as_ref().unwrap();
-                                                        res
-                                                    }),
-                                                ),
-                                            );
-
-                                            let mut credentials = credentials.lock().await;
-
-                                            let signer = credentials
-                                                .normalise(sig.presentation.clone())
-                                                .await;
-
-                                            let state = SignatureState::from_signer(
-                                                signer,
-                                                VerificationInput {
-                                                    alg: JwsAlgorithm::EdDSA,
-                                                    signing_input: frames_buf.into_boxed_slice(),
-                                                    decoded_signature: sig
-                                                        .signature
-                                                        .clone()
-                                                        .into_boxed_slice(),
-                                                },
-                                            );
-                                            state_cache.insert(cache_key, state.clone());
-                                            state
-                                        }
-                                    };
-
-                                    Ok(state)
-                                }
-                            });
-
-                        let signatures = sigs_iter
-                            .fold(Ok(vec![]), |state, info| async {
-                                let Ok(mut state) = state else {
-                                    return state;
-                                };
-                                let item = match info.await {
-                                    Ok(i) => i,
-                                    Err(e) => return Err(e),
-                                };
-                                state.push(item);
-                                Ok(state)
-                            })
-                            .await;
+                        let signatures = frame_manager.verify_signatures().await;
 
                         match signatures {
                             Ok(sigs) => Ok(Box::pin(VerifiedFrame {
-                                info: FrameInfo::new(frame, timestamp, i, fps),
+                                info: frame_state.into(),
                                 sigs,
                             })),
                             Err(e) => Err(e),
