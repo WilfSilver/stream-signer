@@ -89,7 +89,6 @@ impl Framerate<usize> {
     /// the `taken` being the current time used within the frame
     #[inline]
     pub fn sleep_for_rest(&self, taken: Duration) -> Sleep {
-        // sleep(self.frame_time().checked_sub(taken).unwrap_or_default())
         time::sleep(self.frame_time().checked_sub(taken).unwrap_or_default())
     }
 }
