@@ -79,6 +79,9 @@ mod either {
 }
 
 #[cfg(feature = "verifying")]
+pub use verifying::*;
+
+#[cfg(feature = "verifying")]
 mod verifying {
     use glib::object::{Cast, ObjectExt};
     use gst::prelude::GstBinExt;
@@ -94,7 +97,12 @@ mod verifying {
         SignFile,
     };
 
-    use super::super::{verify::VerifiedFrame, Delayed, DelayedStream};
+    // TODO: Move FrameManager out of here and then you can use *
+    pub use crate::video::verify::{
+        InvalidSignatureError, SignatureState, UnverifiedSignature, VerifiedFrame,
+    };
+
+    use super::super::{Delayed, DelayedStream};
     use super::*;
 
     impl SignPipeline {
@@ -130,8 +138,6 @@ mod verifying {
 
             let video_state = Arc::new(verify::VideoState::new(signfile, start_offset, resolver));
 
-            // TODO: THERE ARE WAYYY TOO MANY CLONES AHHHH
-            // TODO: This must be passed in
             let res = delayed
                 .filter_map(|d_info| async {
                     match d_info {
@@ -598,4 +604,16 @@ mod tests {
 
         Ok(())
     }
+
+    // TODO:
+    // - Try to sign chunk > MAX_BUFFER_SIZE or too short
+    // - Try to verify chunk > MAX_BUFFER_SIZE or too short
+    // - Try to sign + verify embedding
+    //   - Sign with embedding that goes out of range
+    // - Try to verify multiple signatures
+    // - Sign with multiple signatures (same intersections + different intersections)
+    // - Sign with two different calls and signatures then add them together and verify
+    // - Verify with stuff which doesn't resolve
+    // - Verify with invalid signatures
+    // - Verify with invalid issuer????
 }

@@ -1,24 +1,62 @@
+use std::{fs::File, ops::Deref, sync::Arc};
+
 use common_gui::video::VideoPlayer;
-use druid::{Data, Event, Lens, LifeCycle, LifeCycleCtx, Widget};
+use druid::{
+    widget::{Label, List, Scroll},
+    Color, Data, Event, Lens, LifeCycle, LifeCycleCtx, UnitPoint, Widget, WidgetExt,
+};
 use futures::StreamExt;
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
+use im::Vector;
 use serde_json::json;
-use stream_signer::{gst, video::FramerateOption, SignFile, SignPipeline};
+use stream_signer::{
+    gst,
+    video::{FramerateOption, SignatureState, UnverifiedSignature},
+    SignFile, SignPipeline,
+};
 use testlibs::{
-    client::{get_client, get_resolver},
+    client::{get_resolver, MemClient},
     identity::TestIdentity,
     issuer::TestIssuer,
 };
+use tokio::sync::Mutex;
 
 use crate::state::{AppData, View};
+
+/// Basic wrapper state so we can implement Data
+#[derive(Clone)]
+pub struct SigState(SignatureState);
+
+impl Data for SigState {
+    fn same(&self, other: &Self) -> bool {
+        match (self.deref(), other.deref()) {
+            (SignatureState::Invalid(_), SignatureState::Invalid(_)) => true,
+            (SignatureState::Unverified(s), SignatureState::Unverified(o)) => s.signer == o.signer,
+            (SignatureState::Unresolved(_), SignatureState::Unresolved(_)) => true,
+            (SignatureState::Verified(s), SignatureState::Verified(o)) => s == o,
+            _ => false,
+        }
+    }
+}
+
+impl Deref for SigState {
+    type Target = SignatureState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 #[derive(Clone, Data, Default, Lens)]
 pub struct VideoOptions {
     pub src: String,
     pub signfile: String,
+    pub sigs: Vector<SigState>,
 }
 
-pub struct VerifyPlayer {}
+pub struct VerifyPlayer {
+    pub sig_list: Box<dyn Widget<VideoOptions>>,
+}
 
 impl VideoPlayer<VideoOptions> for VerifyPlayer {
     fn spawn_player(&self, event_sink: druid::ExtEventSink, options: VideoOptions) {
@@ -28,13 +66,53 @@ impl VideoPlayer<VideoOptions> for VerifyPlayer {
 
 impl VerifyPlayer {
     pub fn new() -> Self {
-        VerifyPlayer {}
+        let sig_list = Box::new(
+            Scroll::new(List::new(|| {
+                Label::new(|item: &SigState, _env: &_| {
+                    let name = match item.deref() {
+                        SignatureState::Invalid(_) => "Invalid".to_string(),
+                        SignatureState::Unresolved(_) => "Could not resolve".to_string(),
+                        SignatureState::Verified(i)
+                        | SignatureState::Unverified(UnverifiedSignature {
+                            signer: i,
+                            error: _,
+                        }) => i.creds()[0]
+                            .credential
+                            .credential_subject
+                            .first()
+                            .unwrap()
+                            .properties
+                            .get("name")
+                            .map(ToString::to_string)
+                            .unwrap_or("Unknown".to_string()),
+                    };
+
+                    println!("Label: {}", &name);
+
+                    format!("{}", &name)
+                })
+                .align_vertical(UnitPoint::LEFT)
+                .padding(10.0)
+                .expand()
+                .height(50.0)
+                .background(Color::rgb(0.5, 0.5, 0.5)) // TODO: Dynamically change
+            }))
+            .vertical()
+            .lens(VideoOptions::sigs),
+        );
+
+        VerifyPlayer { sig_list }
     }
 
     async fn watch_video(event_sink: druid::ExtEventSink, options: VideoOptions) {
         gst::init().expect("Failed gstreamer");
 
-        let client = get_client();
+        let client = {
+            let f = File::open("client.json").unwrap();
+            serde_json::from_reader::<_, MemClient>(f).unwrap()
+        };
+
+        let client = Arc::new(Mutex::new(client));
         let issuer = TestIssuer::new(client.clone())
             .await
             .expect("Failed to create issuer");
@@ -74,10 +152,10 @@ impl VerifyPlayer {
                 return;
             };
 
-            let frame = info.info.clone();
-
             event_sink.add_idle_callback(move |data: &mut AppData| {
-                data.video.curr_frame = Some(frame);
+                data.video.curr_frame = Some(info.info.clone());
+                data.video.options.sigs =
+                    Vector::from_iter(info.sigs.iter().cloned().map(SigState));
             });
         })
         .await;
@@ -92,20 +170,22 @@ impl VerifyPlayer {
 impl Widget<VideoOptions> for VerifyPlayer {
     fn event(
         &mut self,
-        _ctx: &mut druid::EventCtx,
-        _event: &Event,
-        _data: &mut VideoOptions,
-        _env: &druid::Env,
+        ctx: &mut druid::EventCtx,
+        event: &Event,
+        data: &mut VideoOptions,
+        env: &druid::Env,
     ) {
+        self.sig_list.event(ctx, event, data, env);
     }
 
     fn update(
         &mut self,
-        _ctx: &mut druid::UpdateCtx,
-        _old_data: &VideoOptions,
-        _data: &VideoOptions,
-        _env: &druid::Env,
+        ctx: &mut druid::UpdateCtx,
+        old_data: &VideoOptions,
+        data: &VideoOptions,
+        env: &druid::Env,
     ) {
+        self.sig_list.update(ctx, old_data, data, env);
     }
 
     fn layout(
@@ -120,12 +200,15 @@ impl Widget<VideoOptions> for VerifyPlayer {
 
     fn lifecycle(
         &mut self,
-        _ctx: &mut LifeCycleCtx,
-        _event: &LifeCycle,
-        _data: &VideoOptions,
-        _env: &druid::Env,
+        ctx: &mut LifeCycleCtx,
+        event: &LifeCycle,
+        data: &VideoOptions,
+        env: &druid::Env,
     ) {
+        self.sig_list.lifecycle(ctx, event, data, env);
     }
 
-    fn paint(&mut self, _ctx: &mut druid::PaintCtx, _data: &VideoOptions, _env: &druid::Env) {}
+    fn paint(&mut self, ctx: &mut druid::PaintCtx, data: &VideoOptions, env: &druid::Env) {
+        self.sig_list.paint(ctx, data, env);
+    }
 }
