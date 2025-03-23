@@ -82,10 +82,17 @@ impl From<Result<Signer, SignerError>> for SignerState {
 
 /// Stores the information which is required to verify a signature for some individual or
 /// organisation.
+/// TODO: Rename as it clashes with trait
 #[derive(Debug, Clone)]
 pub struct Signer {
     creds: Vec<Credential>,
     pub public_key: Jwk,
+}
+
+impl PartialEq for Signer {
+    fn eq(&self, other: &Self) -> bool {
+        self.public_key == other.public_key
+    }
 }
 
 impl Signer {

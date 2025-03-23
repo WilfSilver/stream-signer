@@ -5,13 +5,14 @@ use std::{collections::HashMap, sync::Arc};
 use identity_iota::{did::CoreDID, document::CoreDocument, prelude::Resolver};
 use iota_sdk::types::block::address::Hrp;
 use rand::distr::SampleString;
+use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 const METHOD: &str = "test";
 
 /// A client which stores the core ids and their related core documents in
 /// memory allowing for use within tests
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MemClient(HashMap<CoreDID, CoreDocument>);
 
 impl MemClient {

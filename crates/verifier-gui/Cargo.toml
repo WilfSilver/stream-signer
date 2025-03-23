@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.97"
-druid = "0.8.3"
+druid = { version = "0.8.3", features = ["im"] }
 identity_iota = "1.5.0"
 instant = "0.1.13"
 futures = "0.3.31"
@@ -15,3 +15,4 @@ stream-signer = { path = "../core", default-features = false, features = ["verif
 common-gui = { path = "../common-gui" }
 testlibs = { path = "../testlibs" }
 tokio = "1.43.0"
+im = "15.1.0"

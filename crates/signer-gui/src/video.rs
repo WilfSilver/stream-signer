@@ -1,12 +1,21 @@
-use std::sync::{
-    atomic::{AtomicBool, AtomicU32, Ordering},
-    Arc,
+use std::{
+    fs::File,
+    sync::{
+        atomic::{AtomicBool, AtomicU32, Ordering},
+        Arc,
+    },
 };
+
+use std::io::prelude::*;
 
 use common_gui::{state::VideoState, video::VideoPlayer};
 use druid::{Code, Color, Data, Event, Lens, LifeCycle, LifeCycleCtx, RenderContext, Widget};
 use futures::TryStreamExt;
-use identity_iota::{core::FromJson, credential::Subject, did::DID};
+use identity_iota::{
+    core::{FromJson, ToJson},
+    credential::Subject,
+    did::DID,
+};
 use serde_json::json;
 use stream_signer::{
     file::Timestamp,
@@ -72,6 +81,14 @@ impl SignPlayer {
             .expect("Failed to build pipeline");
 
         let signer = Arc::new(identity);
+
+        // Write the client to a file so we can access it later
+        async {
+            let c = client.lock().await;
+            let mut output = File::create("client.json").unwrap();
+            write!(output, "{}", c.to_json().unwrap()).unwrap();
+        }
+        .await;
 
         // Cache of the last sign, also stored in the AtomicU32 (but stored as
         // timestamp)
