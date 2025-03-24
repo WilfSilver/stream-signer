@@ -51,33 +51,6 @@ impl SignPipeline {
     }
 }
 
-#[cfg(any(feature = "verifying", feature = "signing"))]
-mod either {
-    use crate::{spec::Coord, video::Frame};
-
-    use super::*;
-
-    impl SignPipeline {
-        /// TODO: Refactor together to frame::Manager :)
-        pub(super) fn frames_to_buffer<'a, I: Iterator<Item = &'a Frame>>(
-            buf_len: usize,
-            start_idx: usize,
-            size: Coord,
-            it: I,
-        ) -> Vec<u8> {
-            let mut frames_buf: Vec<u8> =
-                Vec::with_capacity(size.x as usize * size.y as usize * (buf_len - start_idx));
-
-            for f in it {
-                // TODO: Deal with the sign crop and stuff
-                frames_buf.extend_from_slice(f.raw_buffer());
-            }
-
-            frames_buf
-        }
-    }
-}
-
 #[cfg(feature = "verifying")]
 pub use verifying::*;
 
@@ -461,7 +434,7 @@ mod signing {
                             // bounds
                             // TODO: Include audio
 
-                            let frames_buf = Self::frames_to_buffer(
+                            let frames_buf = frames_to_buffer(
                                 buffer.len(),
                                 start_idx,
                                 size,
@@ -503,6 +476,25 @@ mod signing {
             Ok(res)
         }
     }
+
+    /// TODO: Refactor together to frame::Manager :)
+    fn frames_to_buffer<'a, I: Iterator<Item = &'a Frame>>(
+        buf_len: usize,
+        start_idx: usize,
+        size: Coord,
+        it: I,
+    ) -> Vec<u8> {
+        let mut frames_buf: Vec<u8> =
+            Vec::with_capacity(size.x as usize * size.y as usize * (buf_len - start_idx));
+
+        for f in it {
+            // TODO: Deal with the sign crop and stuff
+            frames_buf.extend_from_slice(f.raw_buffer());
+        }
+
+        frames_buf
+    }
+
     fn get_start_frame(
         start_offset: Option<f64>,
         buf_len: usize,
