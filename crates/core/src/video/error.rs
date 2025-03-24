@@ -1,7 +1,12 @@
+#[cfg(feature = "signing")]
 use identity_iota::storage::JwkStorageDocumentError;
+
+#[cfg(feature = "verifying")]
+use crate::UnknownKey;
+
 use thiserror::Error;
 
-use crate::{file::Timestamp, UnknownKey};
+use crate::file::Timestamp;
 
 use super::BuilderError;
 

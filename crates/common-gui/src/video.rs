@@ -71,11 +71,13 @@ impl<C: VideoPlayer<VideoState<T>>, T: Clone + Data> Widget<VideoState<T>>
 
     fn layout(
         &mut self,
-        _ctx: &mut druid::LayoutCtx,
+        ctx: &mut druid::LayoutCtx,
         bc: &druid::BoxConstraints,
-        _data: &VideoState<T>,
-        _env: &druid::Env,
+        data: &VideoState<T>,
+        env: &druid::Env,
     ) -> druid::Size {
+        self.inner.layout(ctx, bc, data, env);
+
         bc.max()
     }
 

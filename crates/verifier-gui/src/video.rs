@@ -2,8 +2,9 @@ use std::{fs::File, ops::Deref, sync::Arc};
 
 use common_gui::video::VideoPlayer;
 use druid::{
-    widget::{Label, List, Scroll},
-    Color, Data, Event, Lens, LifeCycle, LifeCycleCtx, UnitPoint, Widget, WidgetExt,
+    piet::RenderContext,
+    widget::{Label, List, Painter, Scroll},
+    BoxConstraints, Color, Data, Event, Lens, LifeCycle, LifeCycleCtx, PaintCtx, Widget, WidgetExt,
 };
 use futures::StreamExt;
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
@@ -24,18 +25,22 @@ use tokio::sync::Mutex;
 use crate::state::{AppData, View};
 
 /// Basic wrapper state so we can implement Data
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct SigState(SignatureState);
 
 impl Data for SigState {
     fn same(&self, other: &Self) -> bool {
-        match (self.deref(), other.deref()) {
+        let res = match (self.deref(), other.deref()) {
             (SignatureState::Invalid(_), SignatureState::Invalid(_)) => true,
             (SignatureState::Unverified(s), SignatureState::Unverified(o)) => s.signer == o.signer,
             (SignatureState::Unresolved(_), SignatureState::Unresolved(_)) => true,
             (SignatureState::Verified(s), SignatureState::Verified(o)) => s == o,
             _ => false,
-        }
+        };
+
+        // println!("Same: {res} : {self:?} | {other:?}");
+
+        res
     }
 }
 
@@ -67,36 +72,54 @@ impl VideoPlayer<VideoOptions> for VerifyPlayer {
 impl VerifyPlayer {
     pub fn new() -> Self {
         let sig_list = Box::new(
-            Scroll::new(List::new(|| {
-                Label::new(|item: &SigState, _env: &_| {
-                    let name = match item.deref() {
-                        SignatureState::Invalid(_) => "Invalid".to_string(),
-                        SignatureState::Unresolved(_) => "Could not resolve".to_string(),
-                        SignatureState::Verified(i)
-                        | SignatureState::Unverified(UnverifiedSignature {
-                            signer: i,
-                            error: _,
-                        }) => i.creds()[0]
-                            .credential
-                            .credential_subject
-                            .first()
-                            .unwrap()
-                            .properties
-                            .get("name")
-                            .map(ToString::to_string)
-                            .unwrap_or("Unknown".to_string()),
-                    };
+            Scroll::new(
+                List::new(|| {
+                    Label::new(|item: &SigState, _env: &_| {
+                        let name = match item.deref() {
+                            SignatureState::Invalid(_) => "Invalid".to_string(),
+                            SignatureState::Unresolved(_) => "Could not resolve".to_string(),
+                            SignatureState::Verified(i)
+                            | SignatureState::Unverified(UnverifiedSignature {
+                                signer: i,
+                                error: _,
+                            }) => i.creds()[0]
+                                .credential
+                                .credential_subject
+                                .first()
+                                .unwrap()
+                                .properties
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .map(ToString::to_string)
+                                .unwrap_or("Unknown".to_string()),
+                        };
 
-                    println!("Label: {}", &name);
+                        println!("Label: {}", &name);
 
-                    format!("{}", &name)
+                        name
+                    })
+                    // .align_vertical(UnitPoint::LEFT)
+                    .padding(10.)
+                    // .expand()
+                    .fix_size(150., 50.)
+                    .background(Painter::new(
+                        |ctx: &mut PaintCtx, data: &SigState, _env: &_| {
+                            let color = match data.deref() {
+                                SignatureState::Verified(_) => Color::rgb(0., 1., 0.),
+                                SignatureState::Invalid(_) | SignatureState::Unverified(_) => {
+                                    Color::rgb(1., 0., 0.)
+                                }
+                                SignatureState::Unresolved(_) => Color::rgb(0.5, 0.5, 0.),
+                            };
+
+                            let bounds = ctx.size().to_rect();
+                            ctx.fill(bounds, &color);
+                        },
+                    ))
                 })
-                .align_vertical(UnitPoint::LEFT)
-                .padding(10.0)
-                .expand()
-                .height(50.0)
-                .background(Color::rgb(0.5, 0.5, 0.5)) // TODO: Dynamically change
-            }))
+                .with_spacing(10.)
+                .align_right(),
+            )
             .vertical()
             .lens(VideoOptions::sigs),
         );
@@ -190,11 +213,15 @@ impl Widget<VideoOptions> for VerifyPlayer {
 
     fn layout(
         &mut self,
-        _ctx: &mut druid::LayoutCtx,
+        ctx: &mut druid::LayoutCtx,
         bc: &druid::BoxConstraints,
-        _data: &VideoOptions,
-        _env: &druid::Env,
+        data: &VideoOptions,
+        env: &druid::Env,
     ) -> druid::Size {
+        let margin = druid::Size::new(10., 10.);
+        let inner_padding = BoxConstraints::new(bc.min() + margin, bc.max() - margin);
+        self.sig_list.layout(ctx, &inner_padding, data, env);
+
         bc.max()
     }
 

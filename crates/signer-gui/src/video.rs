@@ -110,7 +110,7 @@ impl SignPlayer {
                     let res = vec![ChunkSigner::new(
                         last_sign,
                         signer.clone(),
-                        last_sign == 0.into(),
+                        last_sign != 0.into(),
                     )];
 
                     sign_last_chunk.0.store(false, Ordering::Relaxed);
