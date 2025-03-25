@@ -153,6 +153,8 @@ impl SignPipelineBuilder<'_> {
     }
 
     fn build_raw_pipeline(self) -> Result<(Pipeline, String), BuilderError> {
+        // TODO: Swap to use playbin https://gstreamer.freedesktop.org/documentation/tutorials/playback/playbin-usage.html?gi-language=c
+
         // Create the pipeline and add elements
         let src = self.src.build()?;
         let convert = self.convert.build()?;

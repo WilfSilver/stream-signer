@@ -5,12 +5,40 @@ use gst_video::VideoFrameExt;
 
 pub use image::GenericImageView;
 
+use crate::{spec::Coord, video::FrameError};
+
 use super::{Framerate, ImageFns};
 
 #[derive(Debug)]
 pub struct Frame(gst_video::VideoFrame<gst_video::video_frame::Readable>);
 
 impl Frame {
+    pub fn cropped_buffer<'a>(
+        &'a self,
+        pos: Coord,
+        size: Coord,
+    ) -> Result<impl Iterator<Item = u8> + 'a, FrameError> {
+        // TODO: I believe this to be slightly broken and so needs heavy testing!! (because it
+        // doesn't take into account the number of bytes a pixel is)
+        if pos.x + size.x > self.width() || pos.y + size.y > self.height() {
+            return Err(FrameError::InvalidCrop(pos, size));
+        }
+
+        let buf = self.raw_buffer();
+        let start_idx = (pos.x + pos.y * self.width()) as usize;
+        let end_idx = (pos.x + size.x + (pos.y + size.y) * self.width()) as usize;
+
+        let width = self.width();
+        let it = buf[start_idx..end_idx]
+            .iter()
+            .enumerate()
+            .filter(move |(i, _)| i % width as usize >= size.x as usize)
+            .map(|(_, v)| v)
+            .cloned();
+
+        Ok(it)
+    }
+
     pub fn raw_buffer(&self) -> &[u8] {
         self.0.plane_data(0).expect("rgb frames have 1 plane")
     }
