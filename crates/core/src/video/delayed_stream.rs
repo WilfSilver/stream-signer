@@ -3,18 +3,35 @@ use std::{collections::VecDeque, sync::Arc, task::Poll};
 use futures::Stream;
 use pin_project::pin_project;
 
+/// This stores the given state of the [DelayedStream]
 #[derive(Debug, PartialEq)]
 pub enum Delayed<T> {
+    /// This means that the buffer is only partially full, and therefore it is
+    /// still delaying the stream
     Partial(Box<[Arc<T>]>),
+    /// This means that the buffer is full, and passes on the element which has
+    /// just been removed and then also a copy of the buffer itself, (and so
+    /// basically the future elements which will be explored)
+    ///
+    /// NOTE: when you have reached the end of the origin stream, the boxed
+    /// slice will start decreasing in size (so you cannot assume that it will
+    /// be the same size throughout)
     Full(Arc<T>, Box<[Arc<T>]>),
 }
 
+/// This is the buffer used by [DelayedStream], and allows elements to be
+/// accessed across threads safely
 pub struct DelayBuffer<T> {
+    /// The buffer itself
     buf: VecDeque<Arc<T>>,
+    /// The maximum length allowed to be stored by the buffer, we have to store
+    /// this due to the sad fact that [VecDeque::capacity] cannot be relied
+    /// on as a precise measure, for more info see [VecDeque::reserve_exact].
     len: usize,
 }
 
 impl<T> DelayBuffer<T> {
+    /// Creates a new buffer with size `len`
     pub fn new(len: usize) -> Self {
         Self {
             buf: {
@@ -26,10 +43,14 @@ impl<T> DelayBuffer<T> {
         }
     }
 
+    /// Returns if the buffer has been filled to its capacity
     pub fn is_filled(&self) -> bool {
         self.buf.len() == self.len
     }
 
+    /// Pushings through the queue, if we are not full, we will return [None],
+    /// but if the queue is full, the oldest element will be removed and
+    /// returned
     pub fn enqueue(&mut self, item: T) -> Option<Arc<T>> {
         let old = if self.is_filled() {
             self.buf.pop_front()
@@ -42,6 +63,7 @@ impl<T> DelayBuffer<T> {
         old
     }
 
+    /// This pop the first element no matter the status of the queue
     pub fn dequeue(&mut self) -> Option<Arc<T>> {
         self.buf.pop_front()
     }
@@ -77,6 +99,14 @@ where
 
 impl<T> Unpin for DelayBuffer<T> {}
 
+/// This is a basic implementation of stream which delays its feed, storing the
+/// elements in a [DelayBuffer], once this buffer is full, it will resume the
+/// stream as normal.
+///
+/// At the end, the buffer will be consumed and all elements will be returned
+/// from it
+///
+/// TODO: Come up with actually good example of why people should use it
 #[pin_project]
 pub struct DelayedStream<T, Src>
 where
@@ -91,6 +121,9 @@ impl<T, Src> DelayedStream<T, Src>
 where
     Src: Stream<Item = T>,
 {
+    /// Creates a new stream, from a given source. The given `len` value will
+    /// be the size of the buffer and so will determine by how much it is
+    /// delayed
     pub fn new(len: usize, source: Src) -> Self {
         Self {
             source,

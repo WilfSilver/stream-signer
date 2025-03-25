@@ -30,6 +30,8 @@ pub struct SignPipelineBuilder<'a> {
 }
 
 impl SignPipelineBuilder<'_> {
+    /// This will utilimately create a [SignPipeline] that is pointing to a file to
+    /// read and stream from
     pub fn from_path<P: AsRef<Path>>(path: &P) -> Option<Self> {
         Some(Self::from_uri(format!(
             "file://{}",
@@ -37,6 +39,8 @@ impl SignPipelineBuilder<'_> {
         )))
     }
 
+    /// This will utilimately create a [SignPipeline] that is pointing to a given
+    /// url
     pub fn from_uri<S: ToString>(uri: S) -> Self {
         Self {
             src: ElementFactory::make("uridecodebin")
@@ -66,17 +70,35 @@ impl SignPipelineBuilder<'_> {
         self
     }
 
+    /// This allows you to add another [Element] to the final gstreamer
+    /// pipeline.
+    ///
+    /// Please note there are some assumptions made and therefore you should
+    /// use this function with caution
     pub fn with_known_extra(self, extra: Element) -> Self {
         self.with_extra(Ok(extra))
     }
 
-    pub fn with_known_extras<I>(self, extras: I) -> Self
+    /// Similar to [Self::with_known_extra], but just with an iterator instead
+    ///
+    /// Please note there are some assumptions made and therefore you should
+    /// use this function with caution
+    pub fn with_known_extras<I>(mut self, new_extras: I) -> Self
     where
         I: IntoIterator<Item = Element>,
     {
-        self.with_potential_extras(Ok(extras))
+        if let Ok(extras) = &mut self.extras {
+            extras.extend(new_extras);
+        }
+        self
     }
 
+    /// This allows you to add another [Element] straight after the build
+    /// process without checking the status. The status will then be checked
+    /// when building this object
+    ///
+    /// Please note there are some assumptions made and therefore you should
+    /// use this function with caution
     pub fn with_extra(mut self, extra: Result<Element, glib::BoolError>) -> Self {
         if let Ok(extras) = &mut self.extras {
             match extra {
@@ -87,21 +109,11 @@ impl SignPipelineBuilder<'_> {
         self
     }
 
-    pub fn with_potential_extras<I>(mut self, extras: Result<I, glib::BoolError>) -> Self
-    where
-        I: IntoIterator<Item = Element>,
-    {
-        if let Ok(old_extras) = &mut self.extras {
-            match extras {
-                Ok(values) => old_extras.extend(values),
-                Err(e) => {
-                    self.extras = Err(e);
-                }
-            }
-        }
-        self
-    }
-
+    /// Similar to [Self::with_extra] but with a series of elements all of which
+    /// might have failed
+    ///
+    /// Please note there are some assumptions made and therefore you should
+    /// use this function with caution
     pub fn with_extras<I>(mut self, extras: I) -> Self
     where
         I: IntoIterator<Item = Result<Element, glib::BoolError>>,
@@ -152,6 +164,8 @@ impl SignPipelineBuilder<'_> {
         Ok(SignPipeline::new(pipe, start, sink))
     }
 
+    /// Converts this object into a [Pipeline] with the sink name it is using
+    /// for the frames
     fn build_raw_pipeline(self) -> Result<(Pipeline, String), BuilderError> {
         // TODO: Swap to use playbin https://gstreamer.freedesktop.org/documentation/tutorials/playback/playbin-usage.html?gi-language=c
 

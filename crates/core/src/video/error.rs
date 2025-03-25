@@ -12,6 +12,11 @@ use super::BuilderError;
 
 pub type StreamError = glib::Error;
 
+/// These are all the different types of errors which could arise while dealing
+/// with the library.
+///
+/// While not actually used here, it can be useful when you are doing everything
+/// in one function and just want a catch all.
 #[derive(Error, Debug)]
 pub enum VideoError {
     #[error(transparent)]
@@ -22,6 +27,9 @@ pub enum VideoError {
     Frame(#[from] FrameError),
 }
 
+/// Stores all the errors which may arise when handling a frame, including
+/// signing and verifying that frame (though it could be the chunk the frame
+/// is apart of)
 #[derive(Error, Debug)]
 pub enum FrameError {
     #[error(transparent)]

@@ -1,3 +1,13 @@
+//! This stores the mostly internally used tools to make it easier to iterate
+//! over some given frames while signing or verifying them
+//!
+//! This does hold the specific logic for either verifying (in [verification])
+//! or signing (in [sign]) and has specific implementations depending on the
+//! contexts ([VideoContext], [FrameContext]) used within the manager
+//!
+//! This also stores a basic iterator to go through all the frames in the
+//! pipeline (in [iter])
+
 use std::{ops::Range, sync::Arc};
 
 use glib::object::Cast;
@@ -12,9 +22,16 @@ use crate::{file::Timestamp, spec::Coord};
 
 use super::{Frame, FrameError, Framerate};
 
+/// This trait is designed to make it easier to extract the exact bytes which
+/// need encrypting from a stored buffer of [Frame]s
 pub trait FrameBuffer {
+    /// This should return the specific frames within the given range as an iterator,
+    /// this is not done through a given trait of [std::ops::Range], to make it more flexible to
+    /// the structures this can be applied to
     fn with_frames<'a>(&'a self, range: Range<usize>) -> Box<dyn Iterator<Item = &'a Frame> + 'a>;
 
+    /// This uses the [FrameBuffer::with_frames] to return the exact buffer which
+    /// should be signed for a given position and size of the viewing window
     fn get_cropped_buffer(
         &self,
         pos: Coord,
@@ -22,7 +39,6 @@ pub trait FrameBuffer {
         range: Range<usize>,
     ) -> Result<Vec<u8>, FrameError> {
         // TODO: Add audio
-        // TODO: I believe this to be slightly broken and so needs heavy testing!!
         let capacity = 3 * size.x as usize * size.y as usize * range.len();
         let mut frames_buf: Vec<u8> = Vec::new();
         frames_buf.reserve_exact(capacity);
@@ -35,18 +51,29 @@ pub trait FrameBuffer {
     }
 }
 
-pub trait FrameContext {}
-pub trait VideoContext {}
-impl VideoContext for () {}
-
-// TODO: swap round the defintions please
-#[derive(Debug)]
-pub struct PipeManager<FC: FrameContext, VC: VideoContext> {
+/// This manager should be created for each frame and stores the state of the
+/// pipeline and frame
+///
+/// By having an overall manager, it has access to a much wider range of
+/// information and can use that to its advantage.
+///
+/// Both [FrameState] and [PipeState] have their own contexts, which is basically
+/// a structure of extra information which then can be used by their respective
+/// impelementations
+#[derive(Debug, Clone)]
+pub struct PipeManager<VC, FC> {
+    /// The information stored about the frame itself
     pub frame: Arc<FrameState<FC>>,
+    /// The information about the pipes state and other information which was
+    /// needed when building the pipeline
     pub state: Arc<PipeState<VC>>,
 }
 
-impl<FC: FrameContext, VC: VideoContext> PipeManager<FC, VC> {
+impl<VC, FC> PipeManager<VC, FC> {
+    /// Creates a new manager with the given `state` and `frame_info`
+    ///
+    /// For ease of use we generate the [FrameState] from the given tuple of
+    /// information
     pub fn new(
         state: Arc<PipeState<VC>>,
         frame_info: (usize, Result<Frame, glib::Error>, FC),
@@ -64,26 +91,34 @@ impl<FC: FrameContext, VC: VideoContext> PipeManager<FC, VC> {
         })
     }
 
+    /// Returns the framerate the video is expected to be playing at from its
+    /// metadata
     pub fn fps(&self) -> Framerate<usize> {
         self.frame.raw.fps()
     }
 
+    /// This uses its information to convert a given [Timestamp] to a frame
+    /// index relative to any buffers stored
     fn convert_to_frames(&self, time: Timestamp) -> usize {
-        time.into_frames(self.fps(), self.state.offset.into())
+        time.into_frames(self.fps(), self.state.offset)
     }
 }
 
 #[derive(Debug)]
-pub struct PipeState<VC: VideoContext> {
+pub struct PipeState<VC> {
+    /// The raw gstreamer pipelien
     pub pipe: Pipeline,
+    /// The start offset time for the video
     pub offset: f64,
+    /// Any extra context which is stored about the state
     pub context: VC,
 
-    /// The sink element created
+    /// The name of the sink element created while building the pipeline
     pub sink: String,
 }
 
-impl<VC: VideoContext> PipeState<VC> {
+impl<VC> PipeState<VC> {
+    /// Creates a new pipeline state
     pub fn new<S: ToString>(
         pipe: Pipeline,
         sink: S,
@@ -154,16 +189,24 @@ impl<VC: VideoContext> PipeState<VC> {
     }
 }
 
+/// This stores specific information about the state of the current frame
 #[derive(Debug)]
-pub struct FrameState<FC: FrameContext> {
+pub struct FrameState<FC> {
+    /// The relative index to the start of the video itself
     pub idx: usize,
+    /// The number of frames which could be shown within the next millisecond
+    /// (the minimum unit for [Timestamp])
     pub excess_frames: usize,
+    /// The raw frame information
     pub raw: Frame,
+    /// The timestamp which this frame appears at, calculated from the start
+    /// offset and the index itself
     pub timestamp: Timestamp,
+    /// Any extra context about the frame required
     pub context: FC,
 }
 
-impl<FC: FrameContext> FrameState<FC> {
+impl<FC> FrameState<FC> {
     pub fn new(
         idx: usize,
         frame: Result<Frame, glib::Error>,
@@ -175,7 +218,7 @@ impl<FC: FrameContext> FrameState<FC> {
             Err(e) => return Err(e.clone().into()),
         };
 
-        let (timestamp, excess_frames) = Timestamp::from_frames(idx, frame.fps(), offset.into());
+        let (timestamp, excess_frames) = Timestamp::from_frames(idx, frame.fps(), offset);
 
         Ok(Self {
             idx,
@@ -186,6 +229,7 @@ impl<FC: FrameContext> FrameState<FC> {
         })
     }
 
+    /// Returns the width and height of the frame as a [Coord]
     pub fn size(&self) -> Coord {
         Coord::new(self.raw.width(), self.raw.height())
     }
@@ -214,23 +258,21 @@ pub mod sign {
 
     use super::*;
 
+    /// This stores the extra information that we need when signing frames, as
+    /// it doesn't change it is stored in the [PipeState]
     pub struct SigningContext<S, F, ITER>
     where
         S: Signer + 'static,
         F: FnMut(FrameInfo) -> ITER,
         ITER: IntoIterator<Item = ChunkSigner<S>>,
     {
+        /// The function that is given by the user to get the [ChunkSigner]s
+        /// which then determine when and how a chunk should be signed
         pub sign_with: Mutex<F>,
     }
 
-    impl<S, F, ITER> VideoContext for SigningContext<S, F, ITER>
-    where
-        S: Signer + 'static,
-        F: FnMut(FrameInfo) -> ITER,
-        ITER: IntoIterator<Item = ChunkSigner<S>>,
-    {
-    }
-
+    /// This is the extra context which is used by [FrameState] and stores a
+    /// cache of all the previous frames before it
     type MyFrameBuffer = Box<[Frame]>;
     impl FrameBuffer for MyFrameBuffer {
         fn with_frames<'a>(
@@ -240,9 +282,10 @@ pub mod sign {
             Box::new(self[range].iter())
         }
     }
-    impl FrameContext for MyFrameBuffer {}
 
-    pub type Manager<S, F, ITER> = PipeManager<MyFrameBuffer, SigningContext<S, F, ITER>>;
+    /// This is the specific implementation of the [PipeManager] used by the
+    /// signing process
+    pub type Manager<S, F, ITER> = PipeManager<SigningContext<S, F, ITER>, MyFrameBuffer>;
     type MyPipeState<S, F, ITER> = Arc<PipeState<SigningContext<S, F, ITER>>>;
 
     /// Makes it easily create a manager from an iterator, it is done as such
@@ -261,6 +304,10 @@ pub mod sign {
         ITER: IntoIterator<Item = ChunkSigner<S>>,
     {
         let mut buffer = buffer.lock().await;
+
+        // NOTE: We are technically not too bothered about exactly how many frames
+        // are stored, therefore to make it easier, we will just use VecDeque::capacity,
+        // even tho it might be greater than the expected number
         if buffer.len() == buffer.capacity() {
             buffer.pop_front();
         }
@@ -280,6 +327,8 @@ pub mod sign {
     }
 
     impl FrameState<MyFrameBuffer> {
+        /// This calculates the starting index for the frame at a given
+        /// timestamp relative to the [MyFrameBuffer]
         fn get_chunk_start(
             &self,
             start: Timestamp,
@@ -288,13 +337,15 @@ pub mod sign {
             self.context
                 .len()
                 .checked_sub(
-                    self.idx
-                        - self.excess_frames
-                        - start.into_frames(self.raw.fps(), start_offset.into()),
+                    self.idx - self.excess_frames - start.into_frames(self.raw.fps(), start_offset),
                 )
                 .ok_or(FrameError::OutOfRange(start, self.timestamp))
         }
 
+        /// This gets the buffer the [ChunkSigner] is wanting and calls [ChunkSigner::sign]
+        ///
+        /// This returns a result of the future so that the signing process can be separated
+        /// off onto another thread if needed by the caller
         pub fn sign<S>(
             &self,
             signer: ChunkSigner<S>,
@@ -303,6 +354,7 @@ pub mod sign {
         where
             S: Signer + 'static,
         {
+            // TODO: Check if the range is valid
             let start_idx = self.get_chunk_start(signer.start, start_offset)?;
             let default_size = self.size();
 
@@ -322,6 +374,8 @@ pub mod sign {
         F: FnMut(FrameInfo) -> ITER,
         ITER: IntoIterator<Item = ChunkSigner<S>>,
     {
+        /// This calls the `sign_with` function stored in [SigningContext] and returns the result
+        /// as an iterator
         pub async fn request_sign_info(&self) -> impl Iterator<Item = ChunkSigner<S>> {
             let fps = self.fps();
 
@@ -336,6 +390,9 @@ pub mod sign {
             sign_info.into_iter()
         }
 
+        /// This performs the signing process by calling the `sign_with` function and signs
+        /// each defined chunk, returning the [SignedChunk]s as a stream which can
+        /// then be interpreted
         pub async fn request_chunks(
             self,
         ) -> Pin<Box<dyn Stream<Item = Result<SignedChunk, FrameError>> + Send>> {
@@ -367,6 +424,9 @@ pub mod sign {
                 }
             }
 
+            // This logic was mostly used to help try and speed up the signing process
+            // slightly and hopefully make it so it didn't interrupt the stream, although
+            // the current implementation doesn't really help it's just kinda left over
             let timestamp = self.frame.timestamp;
             let res = stream::iter(chunks).then(move |(start, futures)| async move {
                 futures.join_all().await.into_iter().try_fold(
@@ -391,31 +451,43 @@ pub mod verification {
     //! Contains specific implementation of [super::PipeManager] which is for
     //! verification
 
-    use std::{collections::HashMap, future::Future};
+    use std::collections::HashMap;
 
-    use futures::{stream, Stream, StreamExt};
+    use futures::{stream, Stream, StreamExt, TryStreamExt};
     use identity_iota::{
         prelude::Resolver,
         verification::jws::{JwsAlgorithm, VerificationInput},
     };
 
     use crate::{
+        file::SignatureWithRange,
         video::{FrameInfo, SignatureState},
         CredentialStore, SignFile,
     };
 
     use super::*;
 
+    /// Due to the caching of [super::super::delayed_stream::DelayedStream],
+    /// the buffer stores both the idex and the [Frame].
     pub type FrameIdxPair = (usize, Result<Frame, glib::Error>);
 
-    pub type Manager<'a> = PipeManager<FutureFramesContext, SigVideoContext<'a>>;
+    /// This is the specific implementation of the [PipeManager] used when
+    /// verifying
+    pub type Manager<'a> = PipeManager<SigVideoContext<'a>, FutureFramesContext>;
 
+    /// This describes the ID we use to uniquely identify signed chunks
     type SigID<'a> = (Timestamp, &'a Vec<u8>);
     type SigCache<'a> = HashMap<SigID<'a>, SignatureState>;
 
+    /// This stores the specific information about the Video that is needed
+    /// when verifying
     pub struct SigVideoContext<'a> {
+        /// The cache of the verified signatures with their states
         pub cache: Mutex<SigCache<'a>>,
+        /// A cache of the credential/presentations that have been
+        /// defined up to this current point
         pub credentials: Mutex<CredentialStore>,
+        /// The sign file with all the signatures themselves
         pub signfile: &'a SignFile,
     }
 
@@ -429,45 +501,26 @@ pub mod verification {
         }
     }
 
-    impl<'a> VideoContext for SigVideoContext<'a> {}
-
     pub type FutureFramesContext = Box<[Arc<(usize, Result<Frame, glib::Error>)>]>;
 
-    impl FrameContext for FutureFramesContext {}
-
     impl<'a> Manager<'a> {
+        /// This will verify all the signatures for the current frame
         pub async fn verify_signatures(self) -> Result<Vec<SignatureState>, FrameError> {
-            self.sigs_iter()
-                .fold(Ok(vec![]), |state, info| async {
-                    let Ok(mut state) = state else {
-                        return state;
-                    };
-                    let item = match info.await {
-                        Ok(i) => i,
-                        Err(e) => return Err(e),
-                    };
-                    state.push(item);
-                    Ok(state)
-                })
-                .await
+            self.sigs_iter().try_collect::<Vec<SignatureState>>().await
         }
 
-        fn sigs_iter(
-            self,
-        ) -> impl Stream<Item = impl Future<Output = Result<SignatureState, FrameError>> + 'a> + 'a
-        {
+        /// Iterates through all the signatures that apply to the current frame,
+        /// and verifies it, outputing an iterator of the resultant [SignatureState]
+        fn sigs_iter(self) -> impl Stream<Item = Result<SignatureState, FrameError>> + 'a {
             let sigs = self
                 .state
                 .context
                 .signfile
                 .get_signatures_at(self.frame.timestamp);
 
-            stream::iter(sigs.zip(std::iter::repeat(Arc::new(self)))).map(
-                |(sig, manager)| async move {
-                    let start = sig.range.start;
-                    let end = sig.range.end;
-                    let sig = sig.signature;
-                    let cache_key = (start, &sig.signature);
+            stream::iter(sigs.zip(std::iter::repeat(Arc::new(self)))).then(
+                |(chunk, manager)| async move {
+                    let cache_key = (chunk.range.start, &chunk.signature.signature);
 
                     let mut state_cache = manager.state.context.cache.lock().await;
 
@@ -475,28 +528,7 @@ pub mod verification {
                     let state = match state_cache.get(&cache_key) {
                         Some(s) => s.clone(),
                         None => {
-                            // TODO: Check if the end frame is after 10 second mark
-                            let end_frame =
-                                manager.convert_to_frames(end) - manager.convert_to_frames(start);
-
-                            let frames_buf = manager.frame.get_cropped_buffer(
-                                sig.pos,
-                                sig.size,
-                                0..end_frame - 1,
-                            )?;
-
-                            let mut credentials = manager.state.context.credentials.lock().await;
-
-                            let signer = credentials.normalise(sig.presentation.clone()).await;
-
-                            let state = SignatureState::from_signer(
-                                signer,
-                                VerificationInput {
-                                    alg: JwsAlgorithm::EdDSA,
-                                    signing_input: frames_buf.into_boxed_slice(),
-                                    decoded_signature: sig.signature.clone().into_boxed_slice(),
-                                },
-                            );
+                            let state = manager.verify_sig(&chunk).await?;
                             state_cache.insert(cache_key, state.clone());
                             state
                         }
@@ -505,6 +537,35 @@ pub mod verification {
                     Ok(state)
                 },
             )
+        }
+
+        /// Verifies a single chunk
+        async fn verify_sig(
+            &self,
+            chunk: &SignatureWithRange<'a>,
+        ) -> Result<SignatureState, FrameError> {
+            // TODO: Check if the end frame is after 10 second mark
+            let end_frame =
+                self.convert_to_frames(chunk.range.end) - self.convert_to_frames(chunk.range.start);
+
+            let sig = chunk.signature;
+
+            let frames_buf = self
+                .frame
+                .get_cropped_buffer(sig.pos, sig.size, 0..end_frame - 1)?;
+
+            let mut credentials = self.state.context.credentials.lock().await;
+
+            let signer = credentials.normalise(sig.presentation.clone()).await;
+
+            Ok(SignatureState::from_signer(
+                signer,
+                VerificationInput {
+                    alg: JwsAlgorithm::EdDSA,
+                    signing_input: frames_buf.into_boxed_slice(),
+                    decoded_signature: sig.signature.clone().into_boxed_slice(),
+                },
+            ))
         }
     }
 
@@ -551,8 +612,11 @@ pub mod iter {
 
     use super::*;
 
+    /// A simple iterator to extract every frame in a given pipeline.
+    ///
+    /// The `state` can then be used to interact with the pipe itelf
     #[derive(Debug)]
-    pub struct SampleIter<VC: VideoContext> {
+    pub struct FrameIter<VC> {
         /// The state of the iterator, storing key information about the
         /// pipeline
         pub state: Arc<PipeState<VC>>,
@@ -567,7 +631,7 @@ pub mod iter {
 
     pub type SampleWithState<VC> = (Arc<PipeState<VC>>, Result<Frame, glib::Error>);
 
-    impl<VC: VideoContext> SampleIter<VC> {
+    impl<VC> FrameIter<VC> {
         pub fn new<S: ToString>(
             pipeline: gst::Pipeline,
             sink: S,
@@ -581,15 +645,19 @@ pub mod iter {
             })
         }
 
+        /// This returns an iterator with the current state information,
+        /// usually this is for making it easier to create a managed stream from
         pub fn zip_state(self) -> impl Iterator<Item = SampleWithState<VC>> {
             let state = self.state.clone();
             std::iter::repeat(state).zip(self)
         }
 
+        /// Sets the pipeline to the [gst::State::Paused] state
         pub fn pause(&self) -> Result<(), glib::Error> {
             self.state.pause()
         }
 
+        /// Sets the pipeline to the [gst::State::Playing] state
         pub fn play(&self) -> Result<(), glib::Error> {
             self.state.play()
         }
@@ -608,8 +676,8 @@ pub mod iter {
         }
     }
 
-    impl<VC: VideoContext> FusedIterator for SampleIter<VC> {}
-    impl<VC: VideoContext> Iterator for SampleIter<VC> {
+    impl<VC> FusedIterator for FrameIter<VC> {}
+    impl<VC> Iterator for FrameIter<VC> {
         type Item = Result<Frame, glib::Error>;
 
         fn next(&mut self) -> Option<Self::Item> {
