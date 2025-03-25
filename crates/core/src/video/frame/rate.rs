@@ -26,7 +26,6 @@ impl<T> FramerateCompatible for T where
 /// It is generic to provide better options of how you want the outputs of the
 /// function, for example if you wish outputs as floats you can convert between
 /// them.
-///
 #[derive(Debug, Clone, Copy)]
 pub struct Framerate<T>(T, T)
 where
@@ -81,6 +80,8 @@ where
 }
 
 impl Framerate<usize> {
+    /// This returns the amount of time a frame is expected to be visible for
+    /// with the given framerate
     pub fn frame_time(&self) -> Duration {
         Duration::from_secs(self.seconds() as u64).div(self.frames() as u32)
     }

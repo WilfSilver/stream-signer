@@ -37,14 +37,10 @@ impl Timestamp {
     ///
     /// - `fps` should be: (number of frames, number of seconds)
     /// - `start_offset` should be the number of milliseconds to start the video at
-    pub fn from_frames(
-        frame: usize,
-        fps: Framerate<usize>,
-        start_offset: Option<f64>,
-    ) -> (Self, usize) {
+    pub fn from_frames(frame: usize, fps: Framerate<usize>, start_offset: f64) -> (Self, usize) {
         let fps: Framerate<f64> = fps.into();
 
-        let milliseconds = start_offset.unwrap_or_default() + fps.convert_to_ms(frame);
+        let milliseconds = start_offset + fps.convert_to_ms(frame);
 
         (
             (milliseconds as u32).into(),
@@ -56,10 +52,10 @@ impl Timestamp {
     ///
     /// - `fps` should be: (number of frames, number of seconds)
     /// - `start_offset` should be the number of milliseconds to start the video at
-    pub fn into_frames(&self, fps: Framerate<usize>, start_offset: Option<f64>) -> usize {
+    pub fn into_frames(&self, fps: Framerate<usize>, start_offset: f64) -> usize {
         let fps: Framerate<f64> = fps.into();
 
-        fps.convert_to_frames(self.0 as f64 - start_offset.unwrap_or_default())
+        fps.convert_to_frames(self.0 as f64 - start_offset)
     }
 }
 

@@ -3,10 +3,7 @@ use std::path::Path;
 
 use crate::time::ONE_SECOND_MILLIS;
 
-use super::{
-    manager::{iter::SampleIter, VideoContext},
-    SignPipelineBuilder, StreamError,
-};
+use super::{manager::iter::FrameIter, SignPipelineBuilder, StreamError};
 
 pub const MAX_CHUNK_LENGTH: usize = 10 * ONE_SECOND_MILLIS as usize;
 
@@ -41,11 +38,8 @@ impl SignPipeline {
     /// frame with the given [gst::Sample] type.
     ///
     /// Parts of this function was inspired by [`vid_frame_iter`](https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter)
-    pub fn try_into_iter<VC: VideoContext>(
-        self,
-        context: VC,
-    ) -> Result<SampleIter<VC>, StreamError> {
-        let pipeline = SampleIter::new(self.pipe, &self.sink, self.start_offset, context)?;
+    pub fn try_into_iter<VC>(self, context: VC) -> Result<FrameIter<VC>, StreamError> {
+        let pipeline = FrameIter::new(self.pipe, &self.sink, self.start_offset, context)?;
 
         pipeline.play()?;
         Ok(pipeline)

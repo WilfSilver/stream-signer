@@ -77,6 +77,9 @@ impl PartialEq for SignedChunk {
 
 /// This gives a single signature with the range which that signature is
 /// applied to to make it easy to iterate over
+///
+/// TODO: Figure out where it places in terms if [SignedChunk] (I don't like
+/// the name)
 #[derive(Debug)]
 pub struct SignatureWithRange<'a> {
     pub range: Range<Timestamp>,

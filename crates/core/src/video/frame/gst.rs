@@ -13,44 +13,61 @@ use super::{Framerate, ImageFns};
 pub struct Frame(gst_video::VideoFrame<gst_video::video_frame::Readable>);
 
 impl Frame {
+    /// This returns the bytes which are within the given bounds determined by
+    /// `pos` and `size`
+    ///
+    /// It will also do the checking if the given crop is within the bounds of
+    /// the image, if it is not it will return a [FrameError::InvalidCrop]
     pub fn cropped_buffer<'a>(
         &'a self,
         pos: Coord,
         size: Coord,
     ) -> Result<impl Iterator<Item = u8> + 'a, FrameError> {
-        // TODO: I believe this to be slightly broken and so needs heavy testing!! (because it
-        // doesn't take into account the number of bytes a pixel is)
         if pos.x + size.x > self.width() || pos.y + size.y > self.height() {
             return Err(FrameError::InvalidCrop(pos, size));
         }
 
         let buf = self.raw_buffer();
-        let start_idx = (pos.x + pos.y * self.width()) as usize;
-        let end_idx = (pos.x + size.x + (pos.y + size.y) * self.width()) as usize;
+        let start_idx = 3 * (pos.x + pos.y * self.width()) as usize;
+        // This ends on the first pixel outside the value (which is why we don't add `size.x`)
+        let end_idx = 3 * (pos.x + (pos.y + size.y) * self.width()) as usize;
+
+        let row_size = size.x as usize * 3;
 
         let width = self.width();
         let it = buf[start_idx..end_idx]
             .iter()
             .enumerate()
-            .filter(move |(i, _)| i % width as usize >= size.x as usize)
+            .filter(move |(i, _)| i % width as usize >= row_size)
             .map(|(_, v)| v)
             .cloned();
 
         Ok(it)
     }
 
+    /// Returns the raw slice of bytes of the [Frame].
+    ///
+    /// The format is as such: each pixel is made up of 3 bytes (red, green,
+    /// blue) with the rows followed by each other.
+    ///
+    /// For more info see [gst_video::VideoFrame::plane_data]
     pub fn raw_buffer(&self) -> &[u8] {
         self.0.plane_data(0).expect("rgb frames have 1 plane")
     }
 
+    /// As the framerate is calculated once we start playing the video, each
+    /// frame has access to the framerate, this therefore gives access to
+    /// the current [Framerate] the video is expected to be running at
     pub fn fps(&self) -> Framerate<usize> {
         self.0.info().fps().into()
     }
 
+    /// Returns the width of the frame
     pub fn width(&self) -> u32 {
         self.0.info().width()
     }
 
+    /// Returns the height of the frame
     pub fn height(&self) -> u32 {
         self.0.info().height()
     }
