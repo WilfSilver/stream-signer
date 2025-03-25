@@ -2,8 +2,8 @@ mod builder;
 mod delayed_stream;
 mod error;
 pub mod frame;
+pub mod manager;
 mod pipeline;
-mod sample_iter;
 #[cfg(feature = "signing")]
 mod sign;
 #[cfg(feature = "verifying")]

@@ -6,7 +6,7 @@ use crate::UnknownKey;
 
 use thiserror::Error;
 
-use crate::file::Timestamp;
+use crate::{file::Timestamp, spec::Coord};
 
 use super::BuilderError;
 
@@ -28,6 +28,8 @@ pub enum FrameError {
     Stream(#[from] StreamError),
     #[error("Tried to access range which is not covered by the video: {0} -> {1}")]
     OutOfRange(Timestamp, Timestamp),
+    #[error("Could not crop frame with pos {0:?} and size {1:?}")]
+    InvalidCrop(Coord, Coord),
     #[cfg(feature = "signing")]
     #[error(transparent)]
     Sign(#[from] JwkStorageDocumentError),

@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 pub type Presentation = IotaPresentation<Jwt>;
 
 /// TODO: Swap Eq to be checking the id, not the whole object please
+///
+/// TODO: Fix JSON compiling
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub enum PresentationOrId {
     Def(PresentationDefinition),

@@ -3,7 +3,10 @@ use std::path::Path;
 
 use crate::time::ONE_SECOND_MILLIS;
 
-use super::{sample_iter::SampleIter, SignPipelineBuilder, StreamError};
+use super::{
+    manager::{iter::SampleIter, VideoContext},
+    SignPipelineBuilder, StreamError,
+};
 
 pub const MAX_CHUNK_LENGTH: usize = 10 * ONE_SECOND_MILLIS as usize;
 
@@ -17,7 +20,7 @@ pub struct SignPipeline {
 }
 
 impl SignPipeline {
-    pub fn new(pipe: Pipeline, start_offset: Option<f64>, sink: String) -> Self {
+    pub(crate) fn new(pipe: Pipeline, start_offset: Option<f64>, sink: String) -> Self {
         Self {
             pipe,
             start_offset,
@@ -38,13 +41,11 @@ impl SignPipeline {
     /// frame with the given [gst::Sample] type.
     ///
     /// Parts of this function was inspired by [`vid_frame_iter`](https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter)
-    pub fn try_into_iter(self) -> Result<SampleIter, StreamError> {
-        let pipeline = SampleIter::new(self.pipe, &self.sink);
-        pipeline.pause()?;
-
-        if let Some(skip_amount) = self.start_offset {
-            pipeline.seek_accurate(skip_amount)?;
-        }
+    pub fn try_into_iter<VC: VideoContext>(
+        self,
+        context: VC,
+    ) -> Result<SampleIter<VC>, StreamError> {
+        let pipeline = SampleIter::new(self.pipe, &self.sink, self.start_offset, context)?;
 
         pipeline.play()?;
         Ok(pipeline)
@@ -61,14 +62,11 @@ mod verifying {
     use identity_iota::prelude::Resolver;
 
     use futures::{stream, Stream, StreamExt};
-    use std::sync::Arc;
     use std::{pin::Pin, time::Instant};
 
+    use crate::video::manager::verification::SigVideoContext;
     use crate::video::FrameError;
-    use crate::{
-        video::{verify, Frame},
-        SignFile,
-    };
+    use crate::{video::manager::verification, SignFile};
 
     // TODO: Move FrameManager out of here and then you can use *
     pub use crate::video::verify::{
@@ -88,14 +86,13 @@ mod verifying {
             impl Stream<Item = Result<Pin<Box<VerifiedFrame>>, FrameError>> + use<'_>,
             StreamError,
         > {
-            let start_offset = self.start_offset;
             let synced = self.set_clock_unsynced();
 
-            let mut iter = self
-                .try_into_iter()?
-                .map(|r| r.map(Frame::from))
-                .enumerate()
-                .peekable();
+            let context = SigVideoContext::new(signfile, resolver);
+
+            let iter = self.try_into_iter(context)?;
+            let video_state = iter.state.clone();
+            let mut iter = iter.enumerate().peekable();
 
             let buf_capacity = match iter.peek() {
                 Some(first) => first
@@ -109,45 +106,39 @@ mod verifying {
 
             let delayed = DelayedStream::<_, _>::new(buf_capacity, stream::iter(iter));
 
-            let video_state = Arc::new(verify::VideoState::new(signfile, start_offset, resolver));
-
             let res = delayed
                 .filter_map(|d_info| async {
                     match d_info {
                         Delayed::Partial(_) => None,
-                        Delayed::Full(a, fut) => Some((a.0, a, fut)),
+                        Delayed::Full(a, fut) => Some((a.0, a.1.clone(), fut)),
                     }
                 })
-                .then(move |frame_state| {
-                    let video_state = video_state.clone();
-                    async move {
-                        let now = Instant::now();
-                        let frame_manager =
-                            match verify::FrameManager::new(video_state.clone(), frame_state).await
-                            {
-                                Ok(m) => m,
-                                Err(e) => return Err(e),
-                            };
+                .zip(stream::iter(std::iter::repeat(video_state)))
+                .then(move |(frame_state, video_state)| async move {
+                    let now = Instant::now();
+                    let manager = match verification::Manager::new(video_state, frame_state) {
+                        Ok(m) => m,
+                        Err(e) => return Err(e),
+                    };
 
-                        let frame_state = frame_manager.frame_state.clone();
-                        let fps = frame_state.fps;
+                    let fps = manager.fps();
+                    let frame_state = manager.frame.clone();
 
-                        let signatures = frame_manager.verify_signatures().await;
+                    let signatures = manager.verify_signatures().await;
 
-                        let res = match signatures {
-                            Ok(sigs) => Ok(Box::pin(VerifiedFrame {
-                                info: frame_state.into(),
-                                sigs,
-                            })),
-                            Err(e) => Err(e),
-                        };
+                    let res = match signatures {
+                        Ok(sigs) => Ok(Box::pin(VerifiedFrame {
+                            info: frame_state.into(),
+                            sigs,
+                        })),
+                        Err(e) => Err(e),
+                    };
 
-                        if synced {
-                            fps.sleep_for_rest(now.elapsed()).await;
-                        }
-
-                        res
+                    if synced {
+                        fps.sleep_for_rest(now.elapsed()).await;
                     }
+
+                    res
                 });
 
             Ok(res)
@@ -174,22 +165,17 @@ mod verifying {
 #[cfg(feature = "signing")]
 mod signing {
     use futures::{stream, Stream, StreamExt};
-    use identity_iota::storage::JwkStorageDocumentError;
-    use std::{
-        collections::{HashMap, VecDeque},
-        pin::Pin,
-        sync::Arc,
-    };
+    use std::{collections::VecDeque, pin::Pin, sync::Arc};
     use tokio::sync::Mutex;
-    use tokio::task::JoinSet;
 
     use crate::{
         file::{SignedChunk, Timestamp},
-        spec::{Coord, SignatureInfo},
-        video::{Frame, FrameError, FrameInfo, Framerate},
+        video::{Frame, FrameError, FrameInfo},
     };
 
-    pub use super::super::{sign::ChunkSigner, Signer};
+    use self::sign::SigningContext;
+
+    pub use super::super::{manager::sign, sign::ChunkSigner, Signer};
     use super::*;
 
     impl SignPipeline {
@@ -358,17 +344,19 @@ mod signing {
             F: FnMut(FrameInfo) -> ITER,
             ITER: IntoIterator<Item = ChunkSigner<S>>,
         {
-            let start_offset = self.start_offset;
+            let sign_with = Mutex::new(sign_with);
+            let context = SigningContext { sign_with };
 
             let mut iter = self
-                .try_into_iter()?
-                .map(|s| s.map(Frame::from))
+                .try_into_iter(context)?
+                .zip_state()
                 .enumerate()
                 .peekable();
 
             let buf_capacity = match iter.peek() {
                 Some(first) => first
                     .1
+                     .1
                     .as_ref()
                     .map_err(|e| e.clone())?
                     .fps()
@@ -376,137 +364,23 @@ mod signing {
                 None => 0,
             };
 
-            let frame_buffer = Arc::new(Mutex::new(VecDeque::<Frame>::with_capacity(buf_capacity)));
+            let mut buf: VecDeque<Frame> = VecDeque::new();
+            buf.reserve_exact(buf_capacity);
+            let frame_buffer = Arc::new(Mutex::new(buf));
 
-            let sign_with = Arc::new(Mutex::new(sign_with));
-            let res = stream::iter(iter)
-                .then(move |(i, frame)| {
-                    let frame_buffer = frame_buffer.clone();
-                    let sign_with = sign_with.clone();
-                    async move {
-                        let frame = match frame {
-                            Ok(f) => f,
-                            Err(e) => {
-                                return Box::pin(stream::iter([Err(e.into())]))
-                                    as Pin<Box<dyn Stream<Item = _> + Send>>
-                            }
-                        };
-
-                        let fps = frame.fps();
-
-                        let mut buffer = frame_buffer.lock().await;
-                        if buffer.len() == buf_capacity {
-                            buffer.pop_front();
-                        }
-                        let size = Coord::new(frame.width(), frame.height());
-
-                        let (timestamp, excess_frames) =
-                            Timestamp::from_frames(i, fps, start_offset);
-
-                        let mut sign_with = sign_with.lock().await;
-                        let sign_info = sign_with(FrameInfo::new(frame.clone(), timestamp, i, fps));
-
-                        buffer.push_back(frame);
-
-                        type SigInfoReturn = Result<SignatureInfo, JwkStorageDocumentError>;
-
-                        let mut chunks: HashMap<Timestamp, JoinSet<SigInfoReturn>> = HashMap::new();
-                        for si in sign_info.into_iter() {
-                            // TODO: Add protections if the timeframe is too short/long
-                            let start = si.start;
-
-                            let start_idx = get_start_frame(
-                                start_offset,
-                                buffer.len(),
-                                fps,
-                                excess_frames,
-                                start,
-                                timestamp,
-                                i,
-                            );
-
-                            let start_idx = match start_idx {
-                                Ok(i) => i,
-                                Err(e) => return Box::pin(stream::iter([Err(e)])),
-                            };
-
-                            // TODO: Potentially optimise by grouping sign info with same
-                            // bounds
-                            // TODO: Include audio
-
-                            let frames_buf = frames_to_buffer(
-                                buffer.len(),
-                                start_idx,
-                                size,
-                                buffer.range(start_idx..buffer.len()),
-                            );
-
-                            let fut = si.sign(frames_buf, size);
-
-                            match chunks.get_mut(&start) {
-                                Some(c) => {
-                                    c.spawn(fut);
-                                }
-                                None => {
-                                    let mut sigs = JoinSet::new();
-                                    sigs.spawn(fut);
-                                    chunks.insert(start, sigs);
-                                }
-                            }
-                        }
-
-                        let res = stream::iter(chunks).then(move |(start, futures)| async move {
-                            futures.join_all().await.into_iter().try_fold(
-                                SignedChunk::new(start, timestamp, vec![]),
-                                |mut curr, signature| match signature {
-                                    Ok(sig) => {
-                                        curr.val.push(sig);
-                                        Ok(curr)
-                                    }
-                                    Err(e) => Err(e.into()),
-                                },
-                            )
-                        });
-
-                        Box::pin(res)
+            let res = stream::iter(iter.zip(std::iter::repeat(frame_buffer)))
+                .then(sign::manage)
+                .then(|manager| async {
+                    match manager {
+                        Ok(m) => m.request_chunks().await,
+                        Err(e) => Box::pin(stream::iter([Err(e.into())]))
+                            as Pin<Box<dyn Stream<Item = _> + Send>>,
                     }
                 })
                 .flatten();
 
             Ok(res)
         }
-    }
-
-    /// TODO: Refactor together to frame::Manager :)
-    fn frames_to_buffer<'a, I: Iterator<Item = &'a Frame>>(
-        buf_len: usize,
-        start_idx: usize,
-        size: Coord,
-        it: I,
-    ) -> Vec<u8> {
-        let mut frames_buf: Vec<u8> =
-            Vec::with_capacity(size.x as usize * size.y as usize * (buf_len - start_idx));
-
-        for f in it {
-            // TODO: Deal with the sign crop and stuff
-            frames_buf.extend_from_slice(f.raw_buffer());
-        }
-
-        frames_buf
-    }
-
-    fn get_start_frame(
-        start_offset: Option<f64>,
-        buf_len: usize,
-        fps: Framerate<usize>,
-        excess: usize,
-        start: Timestamp,
-        at: Timestamp,
-        i: usize,
-    ) -> Result<usize, FrameError> {
-        buf_len
-            .checked_sub(i - excess - start.into_frames(fps, start_offset))
-            .ok_or(FrameError::OutOfRange(start, at))
     }
 }
 
