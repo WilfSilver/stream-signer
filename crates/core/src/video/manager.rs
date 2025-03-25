@@ -213,20 +213,19 @@ impl<FC> FrameState<FC> {
         context: FC,
         offset: f64,
     ) -> Result<Self, FrameError> {
-        let frame: Frame = match frame {
-            Ok(s) => s.into(),
-            Err(e) => return Err(e.clone().into()),
-        };
+        frame
+            .map(|frame| {
+                let (timestamp, excess_frames) = Timestamp::from_frames(idx, frame.fps(), offset);
 
-        let (timestamp, excess_frames) = Timestamp::from_frames(idx, frame.fps(), offset);
-
-        Ok(Self {
-            idx,
-            excess_frames,
-            raw: frame,
-            timestamp,
-            context,
-        })
+                Self {
+                    idx,
+                    excess_frames,
+                    raw: frame,
+                    timestamp,
+                    context,
+                }
+            })
+            .map_err(FrameError::from)
     }
 
     /// Returns the width and height of the frame as a [Coord]
@@ -288,15 +287,19 @@ pub mod sign {
     pub type Manager<S, F, ITER> = PipeManager<SigningContext<S, F, ITER>, MyFrameBuffer>;
     type MyPipeState<S, F, ITER> = Arc<PipeState<SigningContext<S, F, ITER>>>;
 
+    type StatesPair<S, F, ITER> = (MyPipeState<S, F, ITER>, Result<Frame, glib::Error>);
+    type EnumeratedStatesPair<S, F, ITER> = (usize, StatesPair<S, F, ITER>);
+    type SigningItem<S, F, ITER> = (
+        EnumeratedStatesPair<S, F, ITER>,
+        Arc<Mutex<VecDeque<Frame>>>,
+    );
+
     /// Makes it easily create a manager from an iterator, it is done as such
     /// mostly to make it easier to integrate into existing solutions e.g.
     ///
     /// TODO: Write an example pls
     pub async fn manage<S, F, ITER>(
-        ((i, (state, frame)), buffer): (
-            (usize, (MyPipeState<S, F, ITER>, Result<Frame, glib::Error>)),
-            Arc<Mutex<VecDeque<Frame>>>,
-        ),
+        ((i, (state, frame)), buffer): SigningItem<S, F, ITER>,
     ) -> Result<Manager<S, F, ITER>, FrameError>
     where
         S: Signer + 'static,
