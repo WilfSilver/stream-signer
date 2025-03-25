@@ -18,11 +18,11 @@ impl Frame {
     ///
     /// It will also do the checking if the given crop is within the bounds of
     /// the image, if it is not it will return a [FrameError::InvalidCrop]
-    pub fn cropped_buffer<'a>(
-        &'a self,
+    pub fn cropped_buffer(
+        &self,
         pos: Coord,
         size: Coord,
-    ) -> Result<impl Iterator<Item = u8> + 'a, FrameError> {
+    ) -> Result<impl Iterator<Item = u8> + '_, FrameError> {
         if pos.x + size.x > self.width() || pos.y + size.y > self.height() {
             return Err(FrameError::InvalidCrop(pos, size));
         }

@@ -367,7 +367,7 @@ mod signing {
                 .then(|manager| async {
                     match manager {
                         Ok(m) => m.request_chunks().await,
-                        Err(e) => Box::pin(stream::iter([Err(e.into())]))
+                        Err(e) => Box::pin(stream::iter([Err(e)]))
                             as Pin<Box<dyn Stream<Item = _> + Send>>,
                     }
                 })
