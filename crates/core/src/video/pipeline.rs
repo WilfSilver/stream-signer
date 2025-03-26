@@ -3,7 +3,7 @@ use std::path::Path;
 
 use crate::time::ONE_SECOND_MILLIS;
 
-use super::{manager::iter::FrameIter, SignPipelineBuilder, StreamError};
+use super::{builder::SignPipelineBuilder, iter::FrameIter, StreamError};
 
 pub const MAX_CHUNK_LENGTH: usize = 10 * ONE_SECOND_MILLIS as usize;
 
@@ -62,13 +62,10 @@ mod verifying {
     use crate::video::FrameError;
     use crate::{video::manager::verification, SignFile};
 
-    // TODO: Move FrameManager out of here and then you can use *
-    pub use crate::video::verify::{
-        InvalidSignatureError, SignatureState, UnverifiedSignature, VerifiedFrame,
-    };
+    pub use crate::video::verify::{InvalidSignatureError, SignatureState, VerifiedFrame};
 
-    use super::super::{Delayed, DelayedStream};
     use super::*;
+    use crate::utils::{Delayed, DelayedStream};
 
     impl SignPipeline {
         // TODO: Write documentation :)
@@ -163,7 +160,7 @@ mod signing {
     use tokio::sync::Mutex;
 
     use crate::{
-        file::{SignedChunk, Timestamp},
+        file::{SignedInterval, Timestamp},
         video::{Frame, FrameError, FrameInfo},
     };
 
@@ -236,7 +233,7 @@ mod signing {
             self,
             length: T,
             signer: Arc<S>,
-        ) -> Result<impl Stream<Item = Result<SignedChunk, FrameError>>, StreamError> {
+        ) -> Result<impl Stream<Item = Result<SignedInterval, FrameError>>, StreamError> {
             let length = length.into();
             let mut is_start = true;
 
@@ -332,7 +329,7 @@ mod signing {
         pub fn sign<S, F, ITER>(
             self,
             sign_with: F,
-        ) -> Result<impl Stream<Item = Result<SignedChunk, FrameError>>, StreamError>
+        ) -> Result<impl Stream<Item = Result<SignedInterval, FrameError>>, StreamError>
         where
             S: Signer + 'static,
             F: FnMut(FrameInfo) -> ITER,
@@ -444,9 +441,10 @@ mod tests {
                         SignatureState::Invalid(e) => {
                             (false, format!("Signature was invalid: {e:?}"))
                         }
-                        SignatureState::Unverified(e) => {
-                            (false, format!("Signature was unverified: {e:?}"))
-                        }
+                        SignatureState::Unverified { error, subject } => (
+                            false,
+                            format!("Signature was unverified: {subject:?} | {error}"),
+                        ),
                         SignatureState::Unresolved(e) => {
                             (false, format!("Signature could not resolve: {e:?}"))
                         }

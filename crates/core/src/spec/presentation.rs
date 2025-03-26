@@ -3,42 +3,35 @@ use serde::{Deserialize, Serialize};
 
 pub type Presentation = IotaPresentation<Jwt>;
 
-/// TODO: Swap Eq to be checking the id, not the whole object please
-///
-/// TODO: Fix JSON compiling
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, Eq)]
+#[serde(untagged)]
 pub enum PresentationOrId {
-    Def(PresentationDefinition),
-    Ref(PresentationReference),
+    Def { id: String, jwt: Jwt },
+    Ref { id: String },
 }
 
-impl From<PresentationReference> for PresentationOrId {
-    fn from(value: PresentationReference) -> Self {
-        Self::Ref(value)
-    }
-}
-
-impl From<PresentationDefinition> for PresentationOrId {
-    fn from(value: PresentationDefinition) -> Self {
-        Self::Def(value)
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct PresentationReference {
-    pub id: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-pub struct PresentationDefinition {
-    pub id: String,
-    pub pres: Jwt,
-}
-
-impl PresentationDefinition {
-    pub fn get_ref(&self) -> PresentationReference {
-        PresentationReference {
-            id: self.id.clone(),
+impl PresentationOrId {
+    pub fn new_def<S: ToString>(id: S, jwt: Jwt) -> PresentationOrId {
+        PresentationOrId::Def {
+            id: id.to_string(),
+            jwt,
         }
+    }
+
+    pub fn new_ref<S: ToString>(id: S) -> PresentationOrId {
+        PresentationOrId::Ref { id: id.to_string() }
+    }
+
+    pub fn id(&self) -> &str {
+        match self {
+            PresentationOrId::Def { id, jwt: _ } => id,
+            PresentationOrId::Ref { id } => id,
+        }
+    }
+}
+
+impl PartialEq for PresentationOrId {
+    fn eq(&self, other: &Self) -> bool {
+        self.id() == other.id()
     }
 }

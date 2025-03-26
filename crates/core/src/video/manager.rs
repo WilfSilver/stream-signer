@@ -1,12 +1,9 @@
 //! This stores the mostly internally used tools to make it easier to iterate
 //! over some given frames while signing or verifying them
 //!
-//! This does hold the specific logic for either verifying (in [verification])
+//! This holds the specific logic for either verifying (in [verification])
 //! or signing (in [sign]) and has specific implementations depending on the
-//! contexts ([VideoContext], [FrameContext]) used within the manager
-//!
-//! This also stores a basic iterator to go through all the frames in the
-//! pipeline (in [iter])
+//! contexts used within the manager
 
 use std::{ops::Range, sync::Arc};
 
@@ -99,7 +96,7 @@ impl<VC, FC> PipeManager<VC, FC> {
 
     /// This uses its information to convert a given [Timestamp] to a frame
     /// index relative to any buffers stored
-    fn convert_to_frames(&self, time: Timestamp) -> usize {
+    pub fn convert_to_frames(&self, time: Timestamp) -> usize {
         time.into_frames(self.fps(), self.state.offset)
     }
 }
@@ -154,7 +151,7 @@ impl<VC> PipeState<VC> {
     /// Sets the pipeline to the [gst::State::Null] state
     ///
     /// This is required to stop any memory leaks when the pipeline ends
-    fn close(&self) -> Result<(), glib::Error> {
+    pub(super) fn close(&self) -> Result<(), glib::Error> {
         change_state_blocking(&self.pipe, gst::State::Null)
     }
 
@@ -250,8 +247,8 @@ pub mod sign {
     use tokio::task::JoinSet;
 
     use crate::{
-        file::SignedChunk,
-        spec::SignatureInfo,
+        file::SignedInterval,
+        spec::ChunkSignature,
         video::{ChunkSigner, FrameInfo, Signer},
     };
 
@@ -353,7 +350,7 @@ pub mod sign {
             &self,
             signer: ChunkSigner<S>,
             start_offset: f64,
-        ) -> Result<impl Future<Output = Result<SignatureInfo, JwkStorageDocumentError>>, FrameError>
+        ) -> Result<impl Future<Output = Result<ChunkSignature, JwkStorageDocumentError>>, FrameError>
         where
             S: Signer + 'static,
         {
@@ -394,14 +391,14 @@ pub mod sign {
         }
 
         /// This performs the signing process by calling the `sign_with` function and signs
-        /// each defined chunk, returning the [SignedChunk]s as a stream which can
+        /// each defined chunk, returning the [SignedInterval]s as a stream which can
         /// then be interpreted
         pub async fn request_chunks(
             self,
-        ) -> Pin<Box<dyn Stream<Item = Result<SignedChunk, FrameError>> + Send>> {
+        ) -> Pin<Box<dyn Stream<Item = Result<SignedInterval, FrameError>> + Send>> {
             let sign_info = self.request_sign_info().await;
 
-            type SigInfoReturn = Result<SignatureInfo, JwkStorageDocumentError>;
+            type SigInfoReturn = Result<ChunkSignature, JwkStorageDocumentError>;
 
             let mut chunks: HashMap<Timestamp, JoinSet<SigInfoReturn>> = HashMap::new();
             for si in sign_info.into_iter() {
@@ -433,7 +430,7 @@ pub mod sign {
             let timestamp = self.frame.timestamp;
             let res = stream::iter(chunks).then(move |(start, futures)| async move {
                 futures.join_all().await.into_iter().try_fold(
-                    SignedChunk::new(start, timestamp, vec![]),
+                    SignedInterval::new(start, timestamp, vec![]),
                     |mut curr, signature| match signature {
                         Ok(sig) => {
                             curr.val.push(sig);
@@ -463,14 +460,15 @@ pub mod verification {
     };
 
     use crate::{
-        file::SignatureWithRange,
+        file::SignedChunk,
+        utils::CredentialStore,
         video::{FrameInfo, SignatureState},
-        CredentialStore, SignFile,
+        SignFile,
     };
 
     use super::*;
 
-    /// Due to the caching of [super::super::delayed_stream::DelayedStream],
+    /// Due to the caching of [crate::utils::DelayedStream],
     /// the buffer stores both the idex and the [Frame].
     pub type FrameIdxPair = (usize, Result<Frame, glib::Error>);
 
@@ -543,10 +541,7 @@ pub mod verification {
         }
 
         /// Verifies a single chunk
-        async fn verify_sig(
-            &self,
-            chunk: &SignatureWithRange<'a>,
-        ) -> Result<SignatureState, FrameError> {
+        async fn verify_sig(&self, chunk: &SignedChunk<'a>) -> Result<SignatureState, FrameError> {
             // TODO: Check if the end frame is after 10 second mark
             let end_frame =
                 self.convert_to_frames(chunk.range.end) - self.convert_to_frames(chunk.range.start);
@@ -603,142 +598,7 @@ pub mod verification {
     }
 }
 
-pub mod iter {
-    //! This provides an easy interface to iterate over the [Frame]s in a pipeline
-    //! with a state stored throughout
-    //!
-    //! This basically a cut down version of <https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter>
-
-    use std::{iter::FusedIterator, sync::Arc};
-
-    use gst::{CoreError, MessageView};
-
-    use super::*;
-
-    /// A simple iterator to extract every frame in a given pipeline.
-    ///
-    /// The `state` can then be used to interact with the pipe itelf
-    #[derive(Debug)]
-    pub struct FrameIter<VC> {
-        /// The state of the iterator, storing key information about the
-        /// pipeline
-        pub state: Arc<PipeState<VC>>,
-
-        // The amount of time to wait for a frame before assuming there are
-        // none left.
-        pub timeout: gst::ClockTime,
-
-        /// Whether the last frame has been returned
-        pub fused: bool,
-    }
-
-    pub type SampleWithState<VC> = (Arc<PipeState<VC>>, Result<Frame, glib::Error>);
-
-    impl<VC> FrameIter<VC> {
-        pub fn new<S: ToString>(
-            pipeline: gst::Pipeline,
-            sink: S,
-            offset: Option<f64>,
-            context: VC,
-        ) -> Result<Self, glib::Error> {
-            Ok(Self {
-                state: Arc::new(PipeState::new(pipeline, sink, offset, context)?),
-                timeout: 30 * gst::ClockTime::SECOND,
-                fused: false,
-            })
-        }
-
-        /// This returns an iterator with the current state information,
-        /// usually this is for making it easier to create a managed stream from
-        pub fn zip_state(self) -> impl Iterator<Item = SampleWithState<VC>> {
-            let state = self.state.clone();
-            std::iter::repeat(state).zip(self)
-        }
-
-        /// Sets the pipeline to the [gst::State::Paused] state
-        pub fn pause(&self) -> Result<(), glib::Error> {
-            self.state.pause()
-        }
-
-        /// Sets the pipeline to the [gst::State::Playing] state
-        pub fn play(&self) -> Result<(), glib::Error> {
-            self.state.play()
-        }
-
-        /// Seek to the given position in the file, passing the 'accurate' flag to gstreamer.
-        /// If you want to make large jumps in a video file this may be faster than setting a
-        /// very low framerate (because with a low framerate, gstreamer still decodes every frame).
-        pub fn seek_accurate(&self, time: f64) -> Result<(), glib::Error> {
-            self.state.seek_accurate(time)
-        }
-
-        fn try_find_error(bus: &gst::Bus) -> Option<glib::Error> {
-            bus.pop_filtered(&[gst::MessageType::Error, gst::MessageType::Warning])
-                .filter(|msg| matches!(msg.view(), MessageView::Error(_) | MessageView::Warning(_)))
-                .map(into_glib_error)
-        }
-    }
-
-    impl<VC> FusedIterator for FrameIter<VC> {}
-    impl<VC> Iterator for FrameIter<VC> {
-        type Item = Result<Frame, glib::Error>;
-
-        fn next(&mut self) -> Option<Self::Item> {
-            // Required for FusedIterator
-            if self.fused {
-                return None;
-            }
-
-            let bus = self.state.bus();
-
-            // Get access to the appsink element.
-            let appsink = self.state.get_sink();
-
-            // If any error/warning occurred, then return it now.
-            if let Some(error) = Self::try_find_error(&bus) {
-                return Some(Err(error));
-            }
-
-            let sample = appsink.try_pull_sample(self.timeout);
-            match sample {
-                //If a frame was extracted then return it.
-                Some(sample) => Some(Ok(sample.into())),
-
-                None => {
-                    // Make sure no more frames can be drawn if next is called again
-                    self.fused = true;
-
-                    //if no sample was returned then we might have hit the timeout.
-                    //If so check for any possible error being written into the log
-                    //at that time
-                    let ret = match Self::try_find_error(&bus) {
-                        Some(error) => Some(Err(error)),
-                        _ => {
-                            if !appsink.is_eos() {
-                                Some(Err(glib::Error::new(
-                                    CoreError::TooLazy,
-                                    "Gstreamer timed out",
-                                )))
-
-                            // Otherwise we hit EOS and nothing else suspicious happened
-                            } else {
-                                None
-                            }
-                        }
-                    };
-
-                    if let Err(e) = self.state.close() {
-                        panic!("{e:?}");
-                    }
-
-                    ret
-                }
-            }
-        }
-    }
-}
-
-fn change_state_blocking(
+pub(super) fn change_state_blocking(
     pipeline: &gst::Pipeline,
     new_state: gst::State,
 ) -> Result<(), glib::Error> {
@@ -791,7 +651,7 @@ fn get_bus_errors(bus: &gst::Bus) -> impl Iterator<Item = glib::Error> + '_ {
     std::iter::from_fn(move || bus.pop_filtered(&errs_warns).map(into_glib_error))
 }
 
-fn into_glib_error(msg: gst::Message) -> glib::Error {
+pub(super) fn into_glib_error(msg: gst::Message) -> glib::Error {
     match msg.view() {
         MessageView::Error(e) => e.error(),
         MessageView::Warning(w) => w.error(),

@@ -24,55 +24,55 @@ pub type Credential = DecodedJwtCredential;
 #[error("Unknown key id used: {0}")]
 pub struct UnknownKey(String);
 
-/// Quick bridge to [SignerState], allowing to use the type `Result<Signer, SignerError>`
-enum SignerError {
+/// Quick bridge to [SubjectState], allowing to use the type `Result<Subject, SubjectError>`
+enum SubjectError {
     Validation(Vec<JwtValidationError>),
     Resolver(ResolverError),
 }
 
-impl From<CompoundJwtPresentationValidationError> for SignerError {
+impl From<CompoundJwtPresentationValidationError> for SubjectError {
     fn from(value: CompoundJwtPresentationValidationError) -> Self {
         Self::Validation(value.presentation_validation_errors)
     }
 }
 
-impl From<JwtValidationError> for SignerError {
+impl From<JwtValidationError> for SubjectError {
     fn from(value: JwtValidationError) -> Self {
         Self::Validation(vec![value])
     }
 }
 
-impl From<ResolverError> for SignerError {
+impl From<ResolverError> for SubjectError {
     fn from(value: ResolverError) -> Self {
         Self::Resolver(value)
     }
 }
 
-/// Stores information about the [Signer] and any result determined when trying
+/// Stores information about the [Subject] and any result determined when trying
 /// to validate a signature.
 /// TODO: FIX
 #[derive(Debug, Clone)]
-pub enum SignerState {
+pub enum SubjectState {
     Invalid(Vec<Arc<JwtValidationError>>),
     ResolverFailed(Arc<ResolverError>),
-    Valid(Box<Signer>),
+    Valid(Box<Subject>),
 }
 
-impl From<SignerError> for SignerState {
+impl From<SubjectError> for SubjectState {
     #[inline]
-    fn from(value: SignerError) -> Self {
+    fn from(value: SubjectError) -> Self {
         match value {
-            SignerError::Resolver(e) => SignerState::ResolverFailed(Arc::new(e)),
-            SignerError::Validation(e) => {
-                SignerState::Invalid(e.into_iter().map(Arc::new).collect::<Vec<_>>())
+            SubjectError::Resolver(e) => SubjectState::ResolverFailed(Arc::new(e)),
+            SubjectError::Validation(e) => {
+                SubjectState::Invalid(e.into_iter().map(Arc::new).collect::<Vec<_>>())
             }
         }
     }
 }
 
-impl From<Result<Signer, SignerError>> for SignerState {
+impl From<Result<Subject, SubjectError>> for SubjectState {
     #[inline]
-    fn from(value: Result<Signer, SignerError>) -> Self {
+    fn from(value: Result<Subject, SubjectError>) -> Self {
         match value {
             Ok(signer) => Self::Valid(Box::new(signer)),
             Err(e) => e.into(),
@@ -82,27 +82,26 @@ impl From<Result<Signer, SignerError>> for SignerState {
 
 /// Stores the information which is required to verify a signature for some individual or
 /// organisation.
-/// TODO: Rename as it clashes with trait
 #[derive(Debug, Clone)]
-pub struct Signer {
+pub struct Subject {
     creds: Vec<Credential>,
     pub public_key: Jwk,
 }
 
-impl PartialEq for Signer {
+impl PartialEq for Subject {
     fn eq(&self, other: &Self) -> bool {
         self.public_key == other.public_key
     }
 }
 
-impl Signer {
+impl Subject {
     /// Returns a list of verified credentials for the signer
     pub fn creds(&self) -> &[Credential] {
         &self.creds
     }
 }
 
-type IntMap = HashMap<String, SignerState>;
+type IntMap = HashMap<String, SubjectState>;
 
 /// Stores the defined credentials so it can be easily accessed later on
 #[derive(Debug, Default)]
@@ -127,7 +126,7 @@ impl CredentialStore {
     /// # async fn main() -> Result<(), Box<dyn Error>> {
     /// use iota_sdk::client::Client;
     /// use identity_iota::resolver::Resolver;
-    /// use stream_signer::CredentialStore;
+    /// use stream_signer::utils::CredentialStore;
     ///
     /// let client: Client = Client::builder()
     ///   .with_primary_node(API_ENDPOINT, None)?
@@ -151,7 +150,7 @@ impl CredentialStore {
     /// use identity_iota::did::CoreDID;
     /// use identity_iota::document::CoreDocument;
     /// use identity_iota::resolver::Resolver;
-    /// use stream_signer::CredentialStore;
+    /// use stream_signer::utils::CredentialStore;
     ///
     /// // A client that can resolve DIDs of our invented "foo" method.
     /// struct Client;
@@ -196,14 +195,13 @@ impl CredentialStore {
     /// Note that if a definition is given, we must make all the necessary calls to verify the
     /// presentation itself
     ///
-    /// The returned [SignerState] must then be check for how valid the credentials are
-    pub async fn normalise(&mut self, opt: PresentationOrId) -> Result<&SignerState, UnknownKey> {
+    /// The returned [SubjectState] must then be check for how valid the credentials are
+    pub async fn normalise(&mut self, opt: PresentationOrId) -> Result<&SubjectState, UnknownKey> {
         match opt {
-            PresentationOrId::Ref(pres) => self.get(&pres.id).ok_or(UnknownKey(pres.id)),
-            PresentationOrId::Def(def) => {
-                let id = def.id;
+            PresentationOrId::Ref { id } => self.get(&id).ok_or(UnknownKey(id)),
+            PresentationOrId::Def { id, jwt: pres } => {
                 self.map
-                    .insert(id.clone(), self.validate_pres(def.pres).await.into());
+                    .insert(id.clone(), self.validate_pres(pres).await.into());
 
                 Ok(self.get(&id).unwrap())
             }
@@ -211,11 +209,11 @@ impl CredentialStore {
     }
 
     /// Validates the given [Presentation] (as a [Jwt]) and correctly converts
-    /// it into a [Signer] which can then be stored in the system
+    /// it into a [Subject] which can then be stored in the system
     ///
     /// A lot of the code has been taken from
     /// <https://wiki.iota.org/identity.rs/1.5/how-tos/verifiable-presentations/create-and-validate/?language=rust>
-    async fn validate_pres(&self, pres_jwt: Jwt) -> Result<Signer, SignerError> {
+    async fn validate_pres(&self, pres_jwt: Jwt) -> Result<Subject, SubjectError> {
         // Resolve the holder's document.
         let holder_did: CoreDID = JwtPresentationValidatorUtils::extract_holder(&pres_jwt)?;
         let holder = self.resolver.resolve(&holder_did).await?;
@@ -277,7 +275,7 @@ impl CredentialStore {
             })
             .collect::<Vec<_>>();
 
-        Ok(Signer {
+        Ok(Subject {
             creds,
             public_key: public_key.clone(),
         })
