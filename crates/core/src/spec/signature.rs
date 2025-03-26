@@ -1,5 +1,5 @@
 use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
 
 use super::{coord::Coord, PresentationOrId};
 
@@ -8,7 +8,7 @@ type Signature = Vec<u8>;
 /// Information stored about the signature of a video/embedding for a given
 /// time range in a the video
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub struct SignatureInfo {
+pub struct ChunkSignature {
     /// The pixel coordinate of the top left hand corner where the embedding
     /// starts
     pub pos: Coord,
@@ -39,7 +39,6 @@ where
 {
     let s: &str = Deserialize::deserialize(deserializer)?;
 
-    // TODO: Handle error
-    let decoded = STANDARD_NO_PAD.decode(s).unwrap();
+    let decoded = STANDARD_NO_PAD.decode(s).map_err(D::Error::custom)?;
     Ok(decoded)
 }

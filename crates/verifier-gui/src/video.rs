@@ -12,7 +12,7 @@ use im::Vector;
 use serde_json::json;
 use stream_signer::{
     gst,
-    video::{FramerateOption, SignatureState, UnverifiedSignature},
+    video::{builder::FramerateOption, verify::SignatureState},
     SignFile, SignPipeline,
 };
 use testlibs::{
@@ -32,7 +32,16 @@ impl Data for SigState {
     fn same(&self, other: &Self) -> bool {
         let res = match (self.deref(), other.deref()) {
             (SignatureState::Invalid(_), SignatureState::Invalid(_)) => true,
-            (SignatureState::Unverified(s), SignatureState::Unverified(o)) => s.signer == o.signer,
+            (
+                SignatureState::Unverified {
+                    subject: s,
+                    error: _,
+                },
+                SignatureState::Unverified {
+                    subject: o,
+                    error: _,
+                },
+            ) => s == o,
             (SignatureState::Unresolved(_), SignatureState::Unresolved(_)) => true,
             (SignatureState::Verified(s), SignatureState::Verified(o)) => s == o,
             _ => false,
@@ -79,10 +88,10 @@ impl VerifyPlayer {
                             SignatureState::Invalid(_) => "Invalid".to_string(),
                             SignatureState::Unresolved(_) => "Could not resolve".to_string(),
                             SignatureState::Verified(i)
-                            | SignatureState::Unverified(UnverifiedSignature {
-                                signer: i,
+                            | SignatureState::Unverified {
+                                subject: i,
                                 error: _,
-                            }) => i.creds()[0]
+                            } => i.creds()[0]
                                 .credential
                                 .credential_subject
                                 .first()
@@ -106,9 +115,11 @@ impl VerifyPlayer {
                         |ctx: &mut PaintCtx, data: &SigState, _env: &_| {
                             let color = match data.deref() {
                                 SignatureState::Verified(_) => Color::rgb(0., 1., 0.),
-                                SignatureState::Invalid(_) | SignatureState::Unverified(_) => {
-                                    Color::rgb(1., 0., 0.)
-                                }
+                                SignatureState::Invalid(_)
+                                | SignatureState::Unverified {
+                                    error: _,
+                                    subject: _,
+                                } => Color::rgb(1., 0., 0.),
                                 SignatureState::Unresolved(_) => Color::rgb(0.5, 0.5, 0.),
                             };
 

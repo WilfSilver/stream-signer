@@ -6,20 +6,20 @@ use std::{
 use rust_lapper::{Interval, Lapper};
 use srtlib::{Subtitle, Subtitles, Timestamp as SrtTimestamp};
 
-use crate::spec::SignatureInfo;
+use crate::spec::ChunkSignature;
 
 use super::{ParseError, Timestamp};
 
-type SignedInterval = Interval<u32, Vec<SignatureInfo>>;
+type RawSignedInterval = Interval<u32, Vec<ChunkSignature>>;
 
 /// Wrapper type for the Interval storing the time range and signatures which
 /// have signed that interval of video
 #[derive(Debug, Clone)]
-pub struct SignedChunk(SignedInterval);
+pub struct SignedInterval(RawSignedInterval);
 
-impl SignedChunk {
-    pub fn new(from: Timestamp, to: Timestamp, signature: Vec<SignatureInfo>) -> Self {
-        SignedChunk(SignedInterval {
+impl SignedInterval {
+    pub fn new(from: Timestamp, to: Timestamp, signature: Vec<ChunkSignature>) -> Self {
+        SignedInterval(RawSignedInterval {
             start: from.into(),
             stop: to.into(),
             val: signature,
@@ -27,7 +27,7 @@ impl SignedChunk {
     }
 
     pub fn from_subtitle(sub: Subtitle) -> Result<Self, ParseError> {
-        Ok(SignedChunk::new(
+        Ok(SignedInterval::new(
             sub.start_time.into(),
             sub.end_time.into(),
             serde_json::from_str(&sub.text)?,
@@ -44,32 +44,32 @@ impl SignedChunk {
     }
 }
 
-impl From<SignedInterval> for SignedChunk {
-    fn from(value: SignedInterval) -> Self {
-        SignedChunk(value)
+impl From<RawSignedInterval> for SignedInterval {
+    fn from(value: RawSignedInterval) -> Self {
+        SignedInterval(value)
     }
 }
 
-impl From<SignedChunk> for SignedInterval {
-    fn from(value: SignedChunk) -> Self {
+impl From<SignedInterval> for RawSignedInterval {
+    fn from(value: SignedInterval) -> Self {
         value.0
     }
 }
 
-impl Deref for SignedChunk {
-    type Target = SignedInterval;
+impl Deref for SignedInterval {
+    type Target = RawSignedInterval;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl DerefMut for SignedChunk {
+impl DerefMut for SignedInterval {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl PartialEq for SignedChunk {
+impl PartialEq for SignedInterval {
     fn eq(&self, other: &Self) -> bool {
         self.start == other.start && self.stop == other.stop
     }
@@ -77,18 +77,15 @@ impl PartialEq for SignedChunk {
 
 /// This gives a single signature with the range which that signature is
 /// applied to to make it easy to iterate over
-///
-/// TODO: Figure out where it places in terms if [SignedChunk] (I don't like
-/// the name)
 #[derive(Debug)]
-pub struct SignatureWithRange<'a> {
+pub struct SignedChunk<'a> {
     pub range: Range<Timestamp>,
-    pub signature: &'a SignatureInfo,
+    pub signature: &'a ChunkSignature,
 }
 
-impl<'a> SignatureWithRange<'a> {
-    pub fn new(range: Range<Timestamp>, signature: &'a SignatureInfo) -> Self {
-        SignatureWithRange { range, signature }
+impl<'a> SignedChunk<'a> {
+    pub fn new(range: Range<Timestamp>, signature: &'a ChunkSignature) -> Self {
+        SignedChunk { range, signature }
     }
 }
 
@@ -102,8 +99,8 @@ impl<'a> SignatureWithRange<'a> {
 ///
 /// ```no_run
 /// use stream_signer::{
-///     file::{SignFile, SignedChunk},
-///     spec::{Coord, PresentationReference, SignatureInfo},
+///     file::{SignedInterval, SignFile},
+///     spec::{ChunkSignature, Coord, PresentationOrId},
 /// };
 /// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 ///
@@ -112,16 +109,14 @@ impl<'a> SignatureWithRange<'a> {
 /// // Example signature
 /// let s = "i0aL5051w2ADiUk3nljIz1Fk91S3ux3UTidX/B4EU058IKuzD9gcZ3vXAfS2coeCC4gRSiJSmDocHDeXW5tMCw";
 ///
-/// let signature_info = SignatureInfo {
+/// let signature_info = ChunkSignature {
 ///      pos: Coord::new(0, 0),
 ///      size: Coord::new(1920, 1080),
-///      presentation: PresentationReference {
-///          id: "my_presentation_id".to_string(),
-///      }.into(),
+///      presentation: PresentationOrId::new_ref("my_presentation_id"),
 ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
 /// };
 ///
-/// sf.push(SignedChunk::new(0.into(), 1000.into(), vec![signature_info]));
+/// sf.push(SignedInterval::new(0.into(), 1000.into(), vec![signature_info]));
 ///
 /// sf.write("./mysignatures.ssrt").expect("Failed to write signature file");
 /// ```
@@ -139,7 +134,7 @@ impl<'a> SignatureWithRange<'a> {
 /// ```
 ///
 #[derive(Debug)]
-pub struct SignFile(Lapper<u32, Vec<SignatureInfo>>);
+pub struct SignFile(Lapper<u32, Vec<ChunkSignature>>);
 
 impl SignFile {
     pub fn new() -> Self {
@@ -147,7 +142,7 @@ impl SignFile {
     }
 
     /// Reads the buffer as the contents of a file trying to convert it into
-    /// [SignedChunk] which it then stores in a manner which can be quickly
+    /// [SignedInterval] which it then stores in a manner which can be quickly
     /// accessible
     pub fn from_buf(buf: String) -> Result<Self, ParseError> {
         let subs = Subtitles::parse_from_str(buf)?;
@@ -155,7 +150,7 @@ impl SignFile {
     }
 
     /// Reads the given file as the given path and trys to convert the contents
-    /// into [SignedChunk] which it then stores in a manner which can be
+    /// into [SignedInterval] which it then stores in a manner which can be
     /// quickly accessible
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, ParseError> {
         let subs = Subtitles::parse_from_file(path, None)?;
@@ -167,8 +162,8 @@ impl SignFile {
     fn from_subtitles(subs: Subtitles) -> Result<Self, ParseError> {
         let chunks = subs
             .into_iter()
-            .map(|s| SignedChunk::from_subtitle(s).map(|c| c.into()))
-            .collect::<Result<Vec<SignedInterval>, _>>()?;
+            .map(|s| SignedInterval::from_subtitle(s).map(|c| c.into()))
+            .collect::<Result<Vec<RawSignedInterval>, _>>()?;
 
         Ok(SignFile(Lapper::new(chunks)))
     }
@@ -177,8 +172,8 @@ impl SignFile {
     ///
     /// ```no_run
     /// use stream_signer::{
-    ///     file::{SignFile, SignedChunk},
-    ///     spec::{Coord, PresentationReference, SignatureInfo},
+    ///     file::{SignFile, SignedInterval},
+    ///     spec::{Coord, PresentationOrId, ChunkSignature},
     /// };
     /// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
     ///
@@ -187,21 +182,19 @@ impl SignFile {
     /// // Example signature
     /// let s = "i0aL5051w2ADiUk3nljIz1Fk91S3ux3UTidX/B4EU058IKuzD9gcZ3vXAfS2coeCC4gRSiJSmDocHDeXW5tMCw";
     ///
-    /// let signature_info = SignatureInfo {
+    /// let signature_info = ChunkSignature {
     ///      pos: Coord::new(0, 0),
     ///      size: Coord::new(1920, 1080),
-    ///      presentation: PresentationReference {
-    ///          id: "my_presentation_id".to_string(),
-    ///      }.into(),
+    ///      presentation: PresentationOrId::new_ref("my_presentation_id"),
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };
     ///
-    /// sf.push(SignedChunk::new(0.into(), 1000.into(), vec![signature_info]));
+    /// sf.push(SignedInterval::new(0.into(), 1000.into(), vec![signature_info]));
     ///
     /// sf.write("./mysignatures.ssrt").expect("Failed to write to file");
     /// ```
     ///
-    pub fn push(&mut self, chunk: SignedChunk) {
+    pub fn push(&mut self, chunk: SignedInterval) {
         self.0.insert(chunk.into())
     }
 
@@ -218,26 +211,26 @@ impl SignFile {
     /// }
     /// ```
     ///
-    pub fn get_signatures_at(&self, at: Timestamp) -> impl Iterator<Item = SignatureWithRange<'_>> {
+    pub fn get_signatures_at(&self, at: Timestamp) -> impl Iterator<Item = SignedChunk<'_>> {
         self.0.find(at.into(), at.into()).flat_map(|i| {
             i.val
                 .iter()
-                .map(|s| SignatureWithRange::new(i.start.into()..i.stop.into(), s))
+                .map(|s| SignedChunk::new(i.start.into()..i.stop.into(), s))
         })
     }
 
-    /// Iterates over all the `SignedChunk`s stored in the tree, note this is
+    /// Iterates over all the `SignedInterval`s stored in the tree, note this is
     /// not the individual signatures
-    pub fn iter(&self) -> impl Iterator<Item = SignedChunk> + use<'_> {
-        self.0.iter().map(|i| SignedChunk::from(i.clone()))
+    pub fn iter(&self) -> impl Iterator<Item = SignedInterval> + use<'_> {
+        self.0.iter().map(|i| SignedInterval::from(i.clone()))
     }
 
     /// Writes the current store to a specified srt file
     ///
     /// ```no_run
     /// use stream_signer::{
-    ///     file::{SignFile, SignedChunk},
-    ///     spec::{Coord, PresentationReference, SignatureInfo},
+    ///     file::{SignFile, SignedInterval},
+    ///     spec::{Coord, PresentationOrId, ChunkSignature},
     /// };
     /// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
     ///
@@ -246,16 +239,14 @@ impl SignFile {
     /// // Example signature
     /// let s = "i0aL5051w2ADiUk3nljIz1Fk91S3ux3UTidX/B4EU058IKuzD9gcZ3vXAfS2coeCC4gRSiJSmDocHDeXW5tMCw";
     ///
-    /// let signature_info = SignatureInfo {
+    /// let signature_info = ChunkSignature {
     ///      pos: Coord::new(0, 0),
     ///      size: Coord::new(1920, 1080),
-    ///      presentation: PresentationReference {
-    ///          id: "my_presentation_id".to_string(),
-    ///      }.into(),
+    ///      presentation: PresentationOrId::new_ref("my_presentation_id"),
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };
     ///
-    /// sf.push(SignedChunk::new(0.into(), 1000.into(), vec![signature_info]));
+    /// sf.push(SignedInterval::new(0.into(), 1000.into(), vec![signature_info]));
     ///
     /// sf.write("./mysignatures.ssrt").expect("Failed to write sign file");
     /// ```
@@ -272,23 +263,23 @@ impl SignFile {
     }
 }
 
-impl FromIterator<SignedChunk> for SignFile {
-    fn from_iter<T: IntoIterator<Item = SignedChunk>>(iter: T) -> Self {
+impl FromIterator<SignedInterval> for SignFile {
+    fn from_iter<T: IntoIterator<Item = SignedInterval>>(iter: T) -> Self {
         SignFile(Lapper::new(
             iter.into_iter().map(|c| c.into()).collect::<Vec<_>>(),
         ))
     }
 }
 
-impl Extend<SignedChunk> for SignFile {
+impl Extend<SignedInterval> for SignFile {
     /// Inserts all the chunks of the given iterator into the sign file
     ///
     /// Note: Does not compress overlapping fields
     ///
     /// ```no_run
     /// use stream_signer::{
-    ///     file::{SignFile, SignedChunk},
-    ///     spec::{Coord, PresentationReference, SignatureInfo},
+    ///     file::{SignFile, SignedInterval},
+    ///     spec::{Coord, PresentationOrId, ChunkSignature},
     /// };
     /// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
     ///
@@ -297,27 +288,23 @@ impl Extend<SignedChunk> for SignFile {
     /// // Example signature
     /// let s = "i0aL5051w2ADiUk3nljIz1Fk91S3ux3UTidX/B4EU058IKuzD9gcZ3vXAfS2coeCC4gRSiJSmDocHDeXW5tMCw";
     ///
-    /// let first_signature = SignatureInfo {
+    /// let first_signature = ChunkSignature {
     ///      pos: Coord::new(0, 0),
     ///      size: Coord::new(1920, 1080),
-    ///      presentation: PresentationReference {
-    ///          id: "my_presentation_id".to_string(),
-    ///      }.into(),
+    ///      presentation: PresentationOrId::new_ref("my_presentation_id"),
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };
     ///
-    /// let second_signature = SignatureInfo {
+    /// let second_signature = ChunkSignature {
     ///      pos: Coord::new(0, 0),
     ///      size: Coord::new(1920, 1080),
-    ///      presentation: PresentationReference {
-    ///          id: "my_presentation_id".to_string(),
-    ///      }.into(),
+    ///      presentation: PresentationOrId::new_ref("my_presentation_id"),
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };
     ///
     /// sf.extend(vec![
-    ///   SignedChunk::new(0.into(), 1000.into(), vec![first_signature]),
-    ///   SignedChunk::new(1000.into(), 2000.into(), vec![second_signature]),
+    ///   SignedInterval::new(0.into(), 1000.into(), vec![first_signature]),
+    ///   SignedInterval::new(1000.into(), 2000.into(), vec![second_signature]),
     ///   // ...
     /// ]);
     ///
@@ -325,7 +312,7 @@ impl Extend<SignedChunk> for SignFile {
     /// ```
     ///
     ///
-    fn extend<T: IntoIterator<Item = SignedChunk>>(&mut self, iter: T) {
+    fn extend<T: IntoIterator<Item = SignedInterval>>(&mut self, iter: T) {
         for c in iter {
             self.push(c)
         }

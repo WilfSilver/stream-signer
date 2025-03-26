@@ -6,7 +6,9 @@ edition = "2021"
 [features]
 default = ["signing", "verifying"]
 signing = []
-verifying = []
+verifying = ["credential_store", "delayed_stream"]
+credential_store = []
+delayed_stream = []
 withtestlibs = ["testlibs"]
 
 [dependencies]

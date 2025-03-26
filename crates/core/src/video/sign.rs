@@ -10,8 +10,8 @@ use identity_iota::{
     verification::{jwk::Jwk, MethodData},
 };
 
-use crate::spec::{Coord, PresentationOrId, PresentationReference, SignatureInfo};
-use crate::{file::Timestamp, spec::PresentationDefinition};
+use crate::file::Timestamp;
+use crate::spec::{ChunkSignature, Coord, PresentationOrId};
 
 pub trait KeyBound: JwkStorage {}
 impl<T: JwkStorage> KeyBound for T {}
@@ -120,30 +120,23 @@ impl<S: Signer> ChunkSigner<S> {
         self
     }
 
-    /// Signs a given stream and generates [SignatureInfo] which can be stored
+    /// Signs a given stream and generates [ChunkSignature] which can be stored
     /// in the files
     pub async fn sign(
         self,
         msg: Vec<u8>,
         size: Coord,
-    ) -> Result<SignatureInfo, JwkStorageDocumentError> {
+    ) -> Result<ChunkSignature, JwkStorageDocumentError> {
         let presentation: PresentationOrId = if self.is_ref {
-            PresentationReference {
-                id: self.signer.get_presentation_id(),
-            }
-            .into()
+            PresentationOrId::new_ref(self.signer.get_presentation_id())
         } else {
             let jwt = self.signer.presentation().await?;
-            PresentationDefinition {
-                id: self.signer.get_presentation_id(),
-                pres: jwt,
-            }
-            .into()
+            PresentationOrId::new_def(self.signer.get_presentation_id(), jwt)
         };
 
         let signature = self.signer.sign(&msg).await?;
 
-        Ok(SignatureInfo {
+        Ok(ChunkSignature {
             pos: self.pos.unwrap_or_default(),
             size: self.size.unwrap_or(size),
             presentation,

@@ -9,15 +9,9 @@ use identity_iota::{
 };
 use thiserror::Error;
 
-use crate::{Signer, SignerState, UnknownKey};
+use crate::utils::{Subject, SubjectState, UnknownKey};
 
 use super::FrameInfo;
-
-#[derive(Debug, Clone)]
-pub struct UnverifiedSignature {
-    pub error: Arc<SingleStructError<SignatureVerificationErrorKind>>,
-    pub signer: Box<Signer>,
-}
 
 #[derive(Debug, Error, Clone)]
 pub enum InvalidSignatureError {
@@ -30,13 +24,19 @@ pub enum InvalidSignatureError {
 #[derive(Debug, Clone)]
 pub enum SignatureState {
     Invalid(InvalidSignatureError),
-    Unverified(UnverifiedSignature),
+    Unverified {
+        error: Arc<SingleStructError<SignatureVerificationErrorKind>>,
+        subject: Box<Subject>,
+    },
     Unresolved(Arc<ResolverError>),
-    Verified(Box<Signer>),
+    Verified(Box<Subject>),
 }
 
 impl SignatureState {
-    pub fn from_signer(signer: Result<&SignerState, UnknownKey>, input: VerificationInput) -> Self {
+    pub fn from_signer(
+        signer: Result<&SubjectState, UnknownKey>,
+        input: VerificationInput,
+    ) -> Self {
         let signer = match signer {
             Ok(s) => s,
             Err(e) => return Self::Invalid(InvalidSignatureError::UnknownRef(e)),
@@ -44,19 +44,19 @@ impl SignatureState {
 
         let verifier = EdDSAJwsVerifier::default();
         match signer {
-            SignerState::Valid(s) => {
+            SubjectState::Valid(s) => {
                 let verified = verifier.verify(input, &s.public_key);
                 match verified {
                     // TODO: Potential to remove clone and use lifetime
                     Ok(()) => Self::Verified(s.clone()),
-                    Err(e) => Self::Unverified(UnverifiedSignature {
+                    Err(e) => Self::Unverified {
                         error: e.into(),
-                        signer: s.clone(),
-                    }),
+                        subject: s.clone(),
+                    },
                 }
             }
-            SignerState::Invalid(e) => Self::Invalid(InvalidSignatureError::Jwt(e.clone())),
-            SignerState::ResolverFailed(e) => Self::Unresolved(e.clone()),
+            SubjectState::Invalid(e) => Self::Invalid(InvalidSignatureError::Jwt(e.clone())),
+            SubjectState::ResolverFailed(e) => Self::Unresolved(e.clone()),
         }
     }
 }

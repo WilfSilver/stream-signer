@@ -2,13 +2,13 @@
 use identity_iota::storage::JwkStorageDocumentError;
 
 #[cfg(feature = "verifying")]
-use crate::UnknownKey;
+use crate::utils::UnknownKey;
 
 use thiserror::Error;
 
 use crate::{file::Timestamp, spec::Coord};
 
-use super::BuilderError;
+use super::builder::BuilderError;
 
 pub type StreamError = glib::Error;
 

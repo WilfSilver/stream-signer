@@ -20,7 +20,7 @@ use serde_json::json;
 use stream_signer::{
     file::Timestamp,
     gst,
-    video::{ChunkSigner, FramerateOption, MAX_CHUNK_LENGTH},
+    video::{builder::FramerateOption, ChunkSigner, MAX_CHUNK_LENGTH},
     SignFile, SignPipeline,
 };
 use testlibs::{client::get_client, identity::TestIdentity, issuer::TestIssuer};
