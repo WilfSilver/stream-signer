@@ -36,6 +36,8 @@ pub enum FrameError {
     Stream(#[from] StreamError),
     #[error("Tried to access range which is not covered by the video: {0} -> {1}")]
     OutOfRange(Timestamp, Timestamp),
+    #[error("The size of the chunk spread over {0} ms which is not allowed")]
+    InvalidChunkSize(usize),
     #[error("Could not crop frame with pos {0:?} and size {1:?}")]
     InvalidCrop(Coord, Coord),
     #[cfg(feature = "signing")]

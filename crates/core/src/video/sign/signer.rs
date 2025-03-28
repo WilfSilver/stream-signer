@@ -114,8 +114,8 @@ impl<S: Signer> ChunkSigner<S> {
 
     /// Assigns the information about the position and size of embedding to
     /// be signed
-    pub fn with_embedding(mut self, coord: Coord, size: Coord) -> Self {
-        self.pos = Some(coord);
+    pub fn with_embedding(mut self, pos: Coord, size: Coord) -> Self {
+        self.pos = Some(pos);
         self.size = Some(size);
         self
     }

@@ -5,7 +5,7 @@ pub mod iter;
 pub mod manager;
 mod pipeline;
 #[cfg(feature = "signing")]
-mod sign;
+pub mod sign;
 #[cfg(feature = "verifying")]
 pub mod verify;
 
@@ -13,4 +13,4 @@ pub use error::*;
 pub use frame::{Frame, FrameInfo, Framerate};
 pub use pipeline::*;
 #[cfg(feature = "signing")]
-pub use sign::*;
+pub use sign::{ChunkSigner, Signer};

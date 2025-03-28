@@ -160,8 +160,8 @@ mod signing {
     use tokio::sync::Mutex;
 
     use crate::{
-        file::{SignedInterval, Timestamp},
-        video::{Frame, FrameError, FrameInfo},
+        file::SignedInterval,
+        video::{sign::Controller, Frame, FrameError, FrameInfo},
     };
 
     use self::sign::SigningContext;
@@ -170,9 +170,8 @@ mod signing {
     use super::*;
 
     impl SignPipeline {
-        /// Signs the video with common chunk duration, while also partially
-        /// handling credential information such that only one definition is made
-        /// of the credential.
+        /// Signs the video with a given controller which manages when to sign
+        /// a chunk. Similar to [Self::sign], but allows more generalised behaviour.
         ///
         /// For example if you wanted to sign in 100ms second intervals
         ///
@@ -186,12 +185,11 @@ mod signing {
         /// #     issuer::TestIssuer,
         /// #     test_video, videos,
         /// # };
-        ///
         /// #
         /// # #[tokio::main]
         /// # async fn main() -> Result<(), Box<dyn Error>> {
         /// use std::sync::Arc;
-        /// use stream_signer::{video::Signer, SignPipeline, SignFile, TryStreamExt};
+        /// use stream_signer::{video::{sign, Signer}, SignPipeline, SignFile, TryStreamExt};
         ///
         /// stream_signer::gst::init()?;
         ///
@@ -211,13 +209,11 @@ mod signing {
         /// # })
         /// # .await?;
         ///
-        /// # let presentation = identity.build_presentation()?;
-        ///
         /// let pipeline = SignPipeline::build("https://example.com/video_feed").build()?;
         ///
         /// let signer = Arc::new(identity);
         ///
-        /// let sign_file = pipeline.sign_chunks(100, signer)
+        /// let sign_file = pipeline.sign_with(sign::IntervalController::build(signer, 100))
         ///     .expect("Failed to start stream")
         ///     .try_collect::<SignFile>()
         ///     .await
@@ -228,27 +224,101 @@ mod signing {
         /// # Ok(())
         /// # }
         /// ```
-        ///
-        pub fn sign_chunks<T: Into<Timestamp>, S: Signer + 'static>(
+        pub fn sign_with<C, S: Signer + 'static>(
             self,
-            length: T,
-            signer: Arc<S>,
-        ) -> Result<impl Stream<Item = Result<SignedInterval, FrameError>>, StreamError> {
-            let length = length.into();
-            let mut is_start = true;
+            mut controller: C,
+        ) -> Result<impl Stream<Item = Result<SignedInterval, FrameError>>, StreamError>
+        where
+            C: Controller<S> + 'static,
+        {
+            self.sign(move |info| match controller.get_chunk(&info) {
+                Some(res) => vec![res],
+                None => vec![],
+            })
+        }
 
+        /// Extension of [Self::sign_with], allowing multiple controllers of
+        /// the same type
+        ///
+        /// For example if you wanted to sign in 100ms second intervals
+        ///
+        /// ```no_run
+        /// # use std::error::Error;
+        /// # use identity_iota::{core::FromJson, credential::Subject, did::DID};
+        /// # use serde_json::json;
+        /// # use testlibs::{
+        /// #     client::get_client,
+        /// #     identity::TestIdentity,
+        /// #     issuer::TestIssuer,
+        /// #     test_video, videos,
+        /// # };
+        /// #
+        /// # #[tokio::main]
+        /// # async fn main() -> Result<(), Box<dyn Error>> {
+        /// use std::sync::Arc;
+        /// use stream_signer::{video::{sign, Signer}, SignPipeline, SignFile, TryStreamExt};
+        ///
+        /// stream_signer::gst::init()?;
+        ///
+        /// # let client = get_client();
+        /// # let issuer = TestIssuer::new(client.clone()).await?;
+        ///
+        /// # let alice_identity = TestIdentity::new(&issuer, |id| {
+        /// #     Subject::from_json_value(json!({
+        /// #       "id": id.as_str(),
+        /// #       "name": "Alice",
+        /// #       "degree": {
+        /// #         "type": "BachelorDegree",
+        /// #         "name": "Bachelor of Science and Arts",
+        /// #       },
+        /// #       "GPA": "4.0",
+        /// #     })).unwrap()
+        /// # })
+        /// # .await?;
+        ///
+        /// # let bob_identity = TestIdentity::new(&issuer, |id| {
+        /// #     Subject::from_json_value(json!({
+        /// #       "id": id.as_str(),
+        /// #       "name": "Alice",
+        /// #       "degree": {
+        /// #         "type": "BachelorDegree",
+        /// #         "name": "Bachelor of Science and Arts",
+        /// #       },
+        /// #       "GPA": "4.0",
+        /// #     })).unwrap()
+        /// # })
+        /// # .await?;
+        ///
+        /// let pipeline = SignPipeline::build("https://example.com/video_feed").build()?;
+        ///
+        /// let alice_signer = Arc::new(alice_identity);
+        /// let bob_signer = Arc::new(bob_identity);
+        ///
+        /// let sign_file = pipeline.sign_with_all(vec![
+        ///     Box::new(sign::IntervalController::build(alice_signer, 100)),
+        ///     Box::new(sign::IntervalController::build(bob_signer, 100)),
+        /// ])
+        ///     .expect("Failed to start stream")
+        ///     .try_collect::<SignFile>()
+        ///     .await
+        ///     .expect("Failed to look at frame");
+        ///
+        /// sign_file.write("./my_signatures.ssrt").expect("Failed to write signfile");
+        ///
+        /// # Ok(())
+        /// # }
+        /// ```
+        pub fn sign_with_all<C, S: Signer + 'static>(
+            self,
+            mut controllers: Vec<Box<dyn Controller<S>>>,
+        ) -> Result<impl Stream<Item = Result<SignedInterval, FrameError>>, StreamError> {
             self.sign(move |info| {
-                if !info.time.is_start() && info.time % length == 0 {
-                    let res = vec![ChunkSigner::new(
-                        info.time.start() - length,
-                        signer.clone(),
-                        !is_start,
-                    )];
-                    is_start = false;
-                    res
-                } else {
-                    vec![]
-                }
+                controllers
+                    .iter_mut()
+                    .map(move |c| c.get_chunk(&info))
+                    .filter(Option::is_some)
+                    .map(Option::unwrap)
+                    .collect::<Vec<_>>()
             })
         }
 
@@ -296,8 +366,6 @@ mod signing {
         /// #     })).unwrap()
         /// # })
         /// # .await?;
-        ///
-        /// # let presentation = identity.build_presentation()?;
         ///
         /// let pipeline = SignPipeline::build("https://example.com/video_feed").build()?;
         ///
@@ -390,7 +458,10 @@ mod tests {
 
     use super::*;
 
-    use crate::{video::verify::SignatureState, SignFile};
+    use crate::{
+        video::{sign, verify::SignatureState, FrameError},
+        SignFile,
+    };
 
     #[tokio::test]
     async fn sign_and_verify() -> Result<(), Box<dyn Error>> {
@@ -419,7 +490,7 @@ mod tests {
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
         let signfile = pipe
-            .sign_chunks(100, Arc::new(identity))?
+            .sign_with(sign::IntervalController::build(Arc::new(identity), 100))?
             .try_collect::<SignFile>()
             .await?;
 
@@ -463,14 +534,204 @@ mod tests {
         Ok(())
     }
 
+    async fn sign_and_verify_multi(
+        alice_chunk_size: u32,
+        bob_chunk_size: u32,
+    ) -> Result<(), Box<dyn Error>> {
+        gst::init()?;
+
+        let client = get_client();
+        let issuer = TestIssuer::new(client.clone()).await?;
+        let resolver = get_resolver(client);
+
+        let alice_identity = TestIdentity::new(&issuer, |id| {
+            Subject::from_json_value(json!({
+              "id": id.as_str(),
+              "name": "Alice",
+              "degree": {
+                "type": "BachelorDegree",
+                "name": "Bachelor of Science and Arts",
+              },
+              "GPA": "4.0",
+            }))
+            .expect("Invalid subject")
+        })
+        .await?;
+
+        let bob_identity = TestIdentity::new(&issuer, |id| {
+            Subject::from_json_value(json!({
+              "id": id.as_str(),
+              "name": "Bob",
+              "degree": {
+                "type": "BachelorDegree",
+                "name": "Bachelor of Science and Arts",
+              },
+              "GPA": "4.0",
+            }))
+            .expect("Invalid subject")
+        })
+        .await?;
+
+        let filepath = test_video(videos::BIG_BUNNY);
+
+        let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+        let alice_signfile = pipe
+            .sign_with(sign::IntervalController::build(
+                Arc::new(alice_identity),
+                alice_chunk_size,
+            ))?
+            .try_collect::<SignFile>()
+            .await?;
+
+        let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+        let bob_signfile = pipe
+            .sign_with(sign::IntervalController::build(
+                Arc::new(bob_identity),
+                bob_chunk_size,
+            ))?
+            .try_collect::<SignFile>()
+            .await?;
+
+        let mut signfile = alice_signfile;
+        signfile.extend(bob_signfile.iter());
+
+        let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+        pipe.verify(resolver, &signfile)?
+            .for_each(|v| {
+                let v = match v {
+                    Ok(v) => v,
+                    Err(e) => {
+                        // Assert false
+                        assert!(false, "Frame was invalid: {e}");
+                        return future::ready(());
+                    }
+                };
+
+                for s in &v.sigs {
+                    let (is_ok, msg) = match s {
+                        SignatureState::Invalid(e) => {
+                            (false, format!("Signature was invalid: {e:?}"))
+                        }
+                        SignatureState::Unverified { error, subject } => (
+                            false,
+                            format!("Signature was unverified: {subject:?} | {error}"),
+                        ),
+                        SignatureState::Unresolved(e) => {
+                            (false, format!("Signature could not resolve: {e:?}"))
+                        }
+                        SignatureState::Verified(_) => {
+                            (true, "Signature resolved correctly".to_string())
+                        }
+                    };
+
+                    assert!(is_ok, "{msg}");
+                }
+
+                future::ready(())
+            })
+            .await;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sign_and_verify_multi_same() -> Result<(), Box<dyn Error>> {
+        sign_and_verify_multi(100, 100).await
+    }
+
+    #[tokio::test]
+    async fn sign_and_verify_multi_diff() -> Result<(), Box<dyn Error>> {
+        sign_and_verify_multi(100, 179).await
+    }
+
+    #[tokio::test]
+    async fn sign_too_large_chunk() -> Result<(), Box<dyn Error>> {
+        gst::init()?;
+
+        let client = get_client();
+        let issuer = TestIssuer::new(client.clone()).await?;
+
+        let identity = TestIdentity::new(&issuer, |id| {
+            Subject::from_json_value(json!({
+              "id": id.as_str(),
+              "name": "Alice",
+              "degree": {
+                "type": "BachelorDegree",
+                "name": "Bachelor of Science and Arts",
+              },
+              "GPA": "4.0",
+            }))
+            .expect("Invalid subject")
+        })
+        .await?;
+
+        let filepath = test_video(videos::BIG_BUNNY);
+
+        let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+        let res = pipe
+            .sign_with(sign::IntervalController::build(
+                Arc::new(identity),
+                MAX_CHUNK_LENGTH as u32 + 1,
+            ))?
+            .try_collect::<Vec<_>>()
+            .await;
+
+        match res {
+            Err(FrameError::InvalidChunkSize(size)) => assert_eq!(size, MAX_CHUNK_LENGTH + 1),
+            _ => assert!(false, "Response was unexpected: {res:?}"),
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sign_too_small_chunk() -> Result<(), Box<dyn Error>> {
+        gst::init()?;
+
+        let client = get_client();
+        let issuer = TestIssuer::new(client.clone()).await?;
+
+        let identity = TestIdentity::new(&issuer, |id| {
+            Subject::from_json_value(json!({
+              "id": id.as_str(),
+              "name": "Alice",
+              "degree": {
+                "type": "BachelorDegree",
+                "name": "Bachelor of Science and Arts",
+              },
+              "GPA": "4.0",
+            }))
+            .expect("Invalid subject")
+        })
+        .await?;
+
+        let filepath = test_video(videos::BIG_BUNNY);
+
+        let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+        let res = pipe
+            .sign_with(sign::IntervalController::build(Arc::new(identity), 4))?
+            .try_collect::<Vec<_>>()
+            .await;
+
+        match res {
+            Err(FrameError::InvalidChunkSize(size)) => assert_eq!(size, 4),
+            _ => assert!(false, "Response was unexpected: {res:?}"),
+        }
+
+        Ok(())
+    }
+
     // TODO:
-    // - Try to sign chunk > MAX_BUFFER_SIZE or too short
     // - Try to verify chunk > MAX_BUFFER_SIZE or too short
     // - Try to sign + verify embedding
     //   - Sign with embedding that goes out of range
-    // - Try to verify multiple signatures
-    // - Sign with multiple signatures (same intersections + different intersections)
-    // - Sign with two different calls and signatures then add them together and verify
+    // - Sign with multiple signatures (same intersections + different intersections), without two
+    //   different calls
     // - Verify with stuff which doesn't resolve
     // - Verify with invalid signatures
     // - Verify with invalid issuer????
