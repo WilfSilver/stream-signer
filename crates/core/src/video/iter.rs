@@ -9,7 +9,7 @@ use gst::{CoreError, MessageView};
 
 use super::{
     manager::{into_glib_error, PipeState},
-    *,
+    Frame,
 };
 
 /// A simple iterator to extract every frame in a given pipeline.
