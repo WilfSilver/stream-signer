@@ -75,6 +75,7 @@ where
     /// timestamp
     #[inline]
     pub fn convert_to_frames(&self, milli: T) -> usize {
+        println!("milli: {milli}");
         <usize as NumCast>::from(milli * self.frames() / self.milliseconds()).unwrap()
     }
 }

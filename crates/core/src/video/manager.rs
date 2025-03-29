@@ -17,7 +17,9 @@ use tokio::sync::Mutex;
 
 use crate::{file::Timestamp, spec::Coord};
 
-use super::{Frame, FrameError, Framerate};
+use super::{
+    Frame, FrameInfo, Framerate, SigOperationError, StreamError, MAX_CHUNK_LENGTH, MIN_CHUNK_LENGTH,
+};
 
 /// This trait is designed to make it easier to extract the exact bytes which
 /// need encrypting from a stored buffer of [Frame]s
@@ -34,7 +36,7 @@ pub trait FrameBuffer {
         pos: Coord,
         size: Coord,
         range: Range<usize>,
-    ) -> Result<Vec<u8>, FrameError> {
+    ) -> Result<Vec<u8>, SigOperationError> {
         // TODO: Add audio
         let capacity = 3 * size.x as usize * size.y as usize * range.len();
         let mut frames_buf: Vec<u8> = Vec::new();
@@ -73,8 +75,8 @@ impl<VC, FC> PipeManager<VC, FC> {
     /// information
     pub fn new(
         state: Arc<PipeState<VC>>,
-        frame_info: (usize, Result<Frame, glib::Error>, FC),
-    ) -> Result<Self, FrameError> {
+        frame_info: (usize, Result<Frame, StreamError>, FC),
+    ) -> Result<Self, StreamError> {
         let offset = state.offset;
 
         Ok(Self {
@@ -99,6 +101,15 @@ impl<VC, FC> PipeManager<VC, FC> {
     pub fn convert_to_frames(&self, time: Timestamp) -> usize {
         time.into_frames(self.fps(), self.state.offset)
     }
+
+    pub fn get_frame_info(&self) -> FrameInfo {
+        FrameInfo::new(
+            self.frame.raw.clone(),
+            self.frame.idx,
+            self.fps(),
+            self.state.offset,
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -112,6 +123,12 @@ pub struct PipeState<VC> {
 
     /// The name of the sink element created while building the pipeline
     pub sink: String,
+}
+
+impl<VC> Drop for PipeState<VC> {
+    fn drop(&mut self) {
+        self.close().expect("Failed to close pipeline");
+    }
 }
 
 impl<VC> PipeState<VC> {
@@ -206,23 +223,21 @@ pub struct FrameState<FC> {
 impl<FC> FrameState<FC> {
     pub fn new(
         idx: usize,
-        frame: Result<Frame, glib::Error>,
+        frame: Result<Frame, StreamError>,
         context: FC,
         offset: f64,
-    ) -> Result<Self, FrameError> {
-        frame
-            .map(|frame| {
-                let (timestamp, excess_frames) = Timestamp::from_frames(idx, frame.fps(), offset);
+    ) -> Result<Self, StreamError> {
+        frame.map(|frame| {
+            let (timestamp, excess_frames) = Timestamp::from_frames(idx, frame.fps(), offset);
 
-                Self {
-                    idx,
-                    excess_frames,
-                    raw: frame,
-                    timestamp,
-                    context,
-                }
-            })
-            .map_err(FrameError::from)
+            Self {
+                idx,
+                excess_frames,
+                raw: frame,
+                timestamp,
+                context,
+            }
+        })
     }
 
     /// Returns the width and height of the frame as a [Coord]
@@ -249,7 +264,7 @@ pub mod sign {
     use crate::{
         file::SignedInterval,
         spec::ChunkSignature,
-        video::{ChunkSigner, FrameInfo, Signer},
+        video::{ChunkSigner, FrameInfo, Signer, SigningError},
     };
 
     use super::*;
@@ -297,7 +312,7 @@ pub mod sign {
     /// TODO: Write an example pls
     pub async fn manage<S, F, ITER>(
         ((i, (state, frame)), buffer): SigningItem<S, F, ITER>,
-    ) -> Result<Manager<S, F, ITER>, FrameError>
+    ) -> Result<Manager<S, F, ITER>, SigningError>
     where
         S: Signer + 'static,
         F: FnMut(FrameInfo) -> ITER,
@@ -323,7 +338,10 @@ pub mod sign {
 
         buffer.iter().cloned().for_each(|it| frames.push(it));
 
-        PipeManager::new(state, (i, frame, frames.into_boxed_slice()))
+        Ok(PipeManager::new(
+            state,
+            (i, frame, frames.into_boxed_slice()),
+        )?)
     }
 
     impl FrameState<MyFrameBuffer> {
@@ -333,13 +351,13 @@ pub mod sign {
             &self,
             start: Timestamp,
             start_offset: f64,
-        ) -> Result<usize, FrameError> {
+        ) -> Result<usize, SigOperationError> {
             self.context
                 .len()
                 .checked_sub(
                     self.idx - self.excess_frames - start.into_frames(self.raw.fps(), start_offset),
                 )
-                .ok_or(FrameError::OutOfRange(start, self.timestamp))
+                .ok_or(SigOperationError::OutOfRange(start, self.timestamp))
         }
 
         /// This gets the buffer the [ChunkSigner] is wanting and calls [ChunkSigner::sign]
@@ -350,10 +368,18 @@ pub mod sign {
             &self,
             signer: ChunkSigner<S>,
             start_offset: f64,
-        ) -> Result<impl Future<Output = Result<ChunkSignature, JwkStorageDocumentError>>, FrameError>
+        ) -> Result<
+            impl Future<Output = Result<ChunkSignature, JwkStorageDocumentError>>,
+            SigOperationError,
+        >
         where
             S: Signer + 'static,
         {
+            let length: usize = (self.timestamp - signer.start).into();
+            if !(MIN_CHUNK_LENGTH..=MAX_CHUNK_LENGTH).contains(&length) {
+                return Err(SigOperationError::InvalidChunkSize(length));
+            }
+
             // TODO: Check if the range is valid
             let start_idx = self.get_chunk_start(signer.start, start_offset)?;
             let default_size = self.size();
@@ -377,15 +403,8 @@ pub mod sign {
         /// This calls the `sign_with` function stored in [SigningContext] and returns the result
         /// as an iterator
         pub async fn request_sign_info(&self) -> impl Iterator<Item = ChunkSigner<S>> {
-            let fps = self.fps();
-
             let mut sign_with = self.state.context.sign_with.lock().await;
-            let sign_info = sign_with(FrameInfo::new(
-                self.frame.raw.clone(),
-                self.frame.timestamp,
-                self.frame.idx,
-                fps,
-            ));
+            let sign_info = sign_with(self.get_frame_info());
 
             sign_info.into_iter()
         }
@@ -395,7 +414,7 @@ pub mod sign {
         /// then be interpreted
         pub async fn request_chunks(
             self,
-        ) -> Pin<Box<dyn Stream<Item = Result<SignedInterval, FrameError>> + Send>> {
+        ) -> Pin<Box<dyn Stream<Item = Result<SignedInterval, SigningError>> + Send>> {
             let sign_info = self.request_sign_info().await;
 
             type SigInfoReturn = Result<ChunkSignature, JwkStorageDocumentError>;
@@ -409,7 +428,7 @@ pub mod sign {
 
                 let fut = match fut {
                     Ok(f) => f,
-                    Err(e) => return Box::pin(stream::iter([Err(e)])),
+                    Err(e) => return Box::pin(stream::iter([Err(e.into())])),
                 };
 
                 match chunks.get_mut(&start) {
@@ -453,18 +472,13 @@ pub mod verification {
 
     use std::collections::HashMap;
 
-    use futures::{stream, Stream, StreamExt, TryStreamExt};
+    use futures::{stream, Stream, StreamExt};
     use identity_iota::{
         prelude::Resolver,
         verification::jws::{JwsAlgorithm, VerificationInput},
     };
 
-    use crate::{
-        file::SignedChunk,
-        utils::CredentialStore,
-        video::{FrameInfo, SignatureState},
-        SignFile,
-    };
+    use crate::{file::SignedChunk, utils::CredentialStore, video::SignatureState, SignFile};
 
     use super::*;
 
@@ -487,13 +501,13 @@ pub mod verification {
         pub cache: Mutex<SigCache<'a>>,
         /// A cache of the credential/presentations that have been
         /// defined up to this current point
-        pub credentials: Mutex<CredentialStore>,
+        pub credentials: Mutex<CredentialStore<'a>>,
         /// The sign file with all the signatures themselves
         pub signfile: &'a SignFile,
     }
 
     impl<'a> SigVideoContext<'a> {
-        pub fn new(signfile: &'a SignFile, resolver: Resolver) -> Self {
+        pub fn new(signfile: &'a SignFile, resolver: &'a Resolver) -> Self {
             Self {
                 cache: Mutex::new(HashMap::new()),
                 credentials: Mutex::new(CredentialStore::new(resolver)),
@@ -506,13 +520,13 @@ pub mod verification {
 
     impl<'a> Manager<'a> {
         /// This will verify all the signatures for the current frame
-        pub async fn verify_signatures(self) -> Result<Vec<SignatureState>, FrameError> {
-            self.sigs_iter().try_collect::<Vec<SignatureState>>().await
+        pub async fn verify_signatures(self) -> Vec<SignatureState> {
+            self.sigs_iter().collect::<Vec<SignatureState>>().await
         }
 
         /// Iterates through all the signatures that apply to the current frame,
         /// and verifies it, outputing an iterator of the resultant [SignatureState]
-        fn sigs_iter(self) -> impl Stream<Item = Result<SignatureState, FrameError>> + 'a {
+        fn sigs_iter(self) -> impl Stream<Item = SignatureState> + 'a {
             let sigs = self
                 .state
                 .context
@@ -529,41 +543,50 @@ pub mod verification {
                     let state = match state_cache.get(&cache_key) {
                         Some(s) => s.clone(),
                         None => {
-                            let state = manager.verify_sig(&chunk).await?;
+                            let state = manager.verify_sig(&chunk).await;
                             state_cache.insert(cache_key, state.clone());
                             state
                         }
                     };
 
-                    Ok(state)
+                    state
                 },
             )
         }
 
         /// Verifies a single chunk
-        async fn verify_sig(&self, chunk: &SignedChunk<'a>) -> Result<SignatureState, FrameError> {
+        async fn verify_sig(&self, chunk: &SignedChunk<'a>) -> SignatureState {
             // TODO: Check if the end frame is after 10 second mark
             let end_frame =
                 self.convert_to_frames(chunk.range.end) - self.convert_to_frames(chunk.range.start);
 
             let sig = chunk.signature;
 
+            let length: usize = (chunk.range.end - chunk.range.start).into();
+            if !(MIN_CHUNK_LENGTH..=MAX_CHUNK_LENGTH).contains(&length) {
+                return SignatureState::Invalid(SigOperationError::InvalidChunkSize(length).into());
+            }
+
             let frames_buf = self
                 .frame
-                .get_cropped_buffer(sig.pos, sig.size, 0..end_frame - 1)?;
+                .get_cropped_buffer(sig.pos, sig.size, 0..end_frame - 1);
+            let frames_buf = match frames_buf {
+                Ok(b) => b,
+                Err(e) => return SignatureState::Invalid(e.into()),
+            };
 
             let mut credentials = self.state.context.credentials.lock().await;
 
             let signer = credentials.normalise(sig.presentation.clone()).await;
 
-            Ok(SignatureState::from_signer(
+            SignatureState::from_signer(
                 signer,
                 VerificationInput {
                     alg: JwsAlgorithm::EdDSA,
                     signing_input: frames_buf.into_boxed_slice(),
                     decoded_signature: sig.signature.clone().into_boxed_slice(),
                 },
-            ))
+            )
         }
     }
 
@@ -582,17 +605,6 @@ pub mod verification {
                         let res = a.1.as_ref().unwrap();
                         res
                     })),
-            )
-        }
-    }
-
-    impl From<Arc<FrameState<FutureFramesContext>>> for FrameInfo {
-        fn from(value: Arc<FrameState<FutureFramesContext>>) -> Self {
-            FrameInfo::new(
-                value.raw.clone(),
-                value.timestamp,
-                value.idx,
-                value.raw.fps(),
             )
         }
     }

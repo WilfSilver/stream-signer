@@ -178,7 +178,7 @@ impl VerifyPlayer {
         let signfile = SignFile::from_file(options.signfile).expect("Failed to read signfile");
 
         let iter = pipe
-            .verify(resolver, &signfile)
+            .verify(&resolver, &signfile)
             .expect("Failed to start verifying");
 
         iter.for_each(|frame| async {

@@ -5,7 +5,7 @@ use gst_video::VideoFrameExt;
 
 pub use image::GenericImageView;
 
-use crate::{spec::Coord, video::FrameError};
+use crate::{spec::Coord, video::SigOperationError};
 
 use super::{Framerate, ImageFns};
 
@@ -17,14 +17,18 @@ impl Frame {
     /// `pos` and `size`
     ///
     /// It will also do the checking if the given crop is within the bounds of
-    /// the image, if it is not it will return a [FrameError::InvalidCrop]
+    /// the image, if it is not it will return a [SigOperationError::InvalidCrop]
     pub fn cropped_buffer(
         &self,
         pos: Coord,
         size: Coord,
-    ) -> Result<impl Iterator<Item = u8> + '_, FrameError> {
-        if pos.x + size.x > self.width() || pos.y + size.y > self.height() {
-            return Err(FrameError::InvalidCrop(pos, size));
+    ) -> Result<impl Iterator<Item = u8> + '_, SigOperationError> {
+        if pos.x + size.x > self.width()
+            || pos.y + size.y > self.height()
+            || size.x == 0 // Means we are signing nothing and there's no point in that
+            || size.y == 0
+        {
+            return Err(SigOperationError::InvalidCrop(pos, size));
         }
 
         let buf = self.raw_buffer();

@@ -6,6 +6,7 @@ use crate::time::ONE_SECOND_MILLIS;
 use super::{builder::SignPipelineBuilder, iter::FrameIter, StreamError};
 
 pub const MAX_CHUNK_LENGTH: usize = 10 * ONE_SECOND_MILLIS as usize;
+pub const MIN_CHUNK_LENGTH: usize = 50;
 
 /// This is a wrapper type around gstreamer's [Pipeline] providing functions to
 /// sign and verify a stream.
@@ -58,23 +59,24 @@ mod verifying {
     use futures::{stream, Stream, StreamExt};
     use std::{pin::Pin, time::Instant};
 
-    use crate::video::manager::verification::SigVideoContext;
-    use crate::video::FrameError;
-    use crate::{video::manager::verification, SignFile};
+    use crate::{
+        utils::{Delayed, DelayedStream},
+        video::manager::verification::{self, SigVideoContext},
+        SignFile,
+    };
 
     pub use crate::video::verify::{InvalidSignatureError, SignatureState, VerifiedFrame};
 
     use super::*;
-    use crate::utils::{Delayed, DelayedStream};
 
     impl SignPipeline {
         // TODO: Write documentation :)
-        pub fn verify(
+        pub fn verify<'a>(
             self,
-            resolver: Resolver,
-            signfile: &SignFile,
+            resolver: &'a Resolver,
+            signfile: &'a SignFile,
         ) -> Result<
-            impl Stream<Item = Result<Pin<Box<VerifiedFrame>>, FrameError>> + use<'_>,
+            impl Stream<Item = Result<Pin<Box<VerifiedFrame>>, StreamError>> + use<'a>,
             StreamError,
         > {
             let synced = self.set_clock_unsynced();
@@ -113,23 +115,17 @@ mod verifying {
                     };
 
                     let fps = manager.fps();
-                    let frame_state = manager.frame.clone();
+                    let info = manager.get_frame_info();
 
-                    let signatures = manager.verify_signatures().await;
+                    let sigs = manager.verify_signatures().await;
 
-                    let res = match signatures {
-                        Ok(sigs) => Ok(Box::pin(VerifiedFrame {
-                            info: frame_state.into(),
-                            sigs,
-                        })),
-                        Err(e) => Err(e),
-                    };
+                    let res = Box::pin(VerifiedFrame { info, sigs });
 
                     if synced {
                         fps.sleep_for_rest(now.elapsed()).await;
                     }
 
-                    res
+                    Ok(res)
                 });
 
             Ok(res)
@@ -161,7 +157,7 @@ mod signing {
 
     use crate::{
         file::SignedInterval,
-        video::{sign::Controller, Frame, FrameError, FrameInfo},
+        video::{sign::Controller, Frame, FrameInfo, SigningError},
     };
 
     use self::sign::SigningContext;
@@ -227,7 +223,7 @@ mod signing {
         pub fn sign_with<C, S: Signer + 'static>(
             self,
             mut controller: C,
-        ) -> Result<impl Stream<Item = Result<SignedInterval, FrameError>>, StreamError>
+        ) -> Result<impl Stream<Item = Result<SignedInterval, SigningError>>, StreamError>
         where
             C: Controller<S> + 'static,
         {
@@ -311,13 +307,13 @@ mod signing {
         pub fn sign_with_all<C, S: Signer + 'static>(
             self,
             mut controllers: Vec<Box<dyn Controller<S>>>,
-        ) -> Result<impl Stream<Item = Result<SignedInterval, FrameError>>, StreamError> {
+        ) -> Result<impl Stream<Item = Result<SignedInterval, SigningError>>, StreamError> {
             self.sign(move |info| {
                 controllers
                     .iter_mut()
                     .map(move |c| c.get_chunk(&info))
                     .filter(Option::is_some)
-                    .map(Option::unwrap)
+                    .flatten()
                     .collect::<Vec<_>>()
             })
         }
@@ -397,7 +393,7 @@ mod signing {
         pub fn sign<S, F, ITER>(
             self,
             sign_with: F,
-        ) -> Result<impl Stream<Item = Result<SignedInterval, FrameError>>, StreamError>
+        ) -> Result<impl Stream<Item = Result<SignedInterval, SigningError>>, StreamError>
         where
             S: Signer + 'static,
             F: FnMut(FrameInfo) -> ITER,
@@ -459,12 +455,20 @@ mod tests {
     use super::*;
 
     use crate::{
-        video::{sign, verify::SignatureState, FrameError},
+        spec::Coord,
+        video::{
+            sign::{self, Controller},
+            verify::SignatureState,
+            SigOperationError, SigningError,
+        },
         SignFile,
     };
 
-    #[tokio::test]
-    async fn sign_and_verify() -> Result<(), Box<dyn Error>> {
+    async fn sign_and_verify_int<F, C>(get_controller: F) -> Result<(), Box<dyn Error>>
+    where
+        F: Fn(Arc<TestIdentity>) -> C,
+        C: Controller<TestIdentity> + 'static,
+    {
         gst::init()?;
 
         let client = get_client();
@@ -490,48 +494,43 @@ mod tests {
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
         let signfile = pipe
-            .sign_with(sign::IntervalController::build(Arc::new(identity), 100))?
+            .sign_with(get_controller(Arc::new(identity)))?
             .try_collect::<SignFile>()
             .await?;
 
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
-        pipe.verify(resolver, &signfile)?
+        let mut count = 0;
+        pipe.verify(&resolver, &signfile)?
             .for_each(|v| {
+                count += 1;
+
                 let v = match v {
                     Ok(v) => v,
                     Err(e) => {
-                        // Assert false
-                        assert!(false, "Frame was invalid: {e}");
-                        return future::ready(());
+                        panic!("Frame was invalid: {e}");
                     }
                 };
 
                 for s in &v.sigs {
-                    let (is_ok, msg) = match s {
-                        SignatureState::Invalid(e) => {
-                            (false, format!("Signature was invalid: {e:?}"))
-                        }
-                        SignatureState::Unverified { error, subject } => (
-                            false,
-                            format!("Signature was unverified: {subject:?} | {error}"),
-                        ),
-                        SignatureState::Unresolved(e) => {
-                            (false, format!("Signature could not resolve: {e:?}"))
-                        }
-                        SignatureState::Verified(_) => {
-                            (true, "Signature resolved correctly".to_string())
-                        }
-                    };
-
-                    assert!(is_ok, "{msg}");
+                    assert!(
+                        matches!(s, SignatureState::Verified(_)),
+                        "{s:?} resolved correctly"
+                    );
                 }
 
                 future::ready(())
             })
             .await;
 
+        assert!(count > 0, "We verified some chunks");
+
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn sign_and_verify() -> Result<(), Box<dyn Error>> {
+        sign_and_verify_int(|i| sign::IntervalController::build(i, 100)).await
     }
 
     async fn sign_and_verify_multi(
@@ -599,52 +598,130 @@ mod tests {
 
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
-        pipe.verify(resolver, &signfile)?
+        let mut count = 0;
+        pipe.verify(&resolver, &signfile)?
             .for_each(|v| {
+                count += 1;
+
                 let v = match v {
                     Ok(v) => v,
                     Err(e) => {
-                        // Assert false
-                        assert!(false, "Frame was invalid: {e}");
-                        return future::ready(());
+                        panic!("Frame was invalid: {e}");
                     }
                 };
 
                 for s in &v.sigs {
-                    let (is_ok, msg) = match s {
-                        SignatureState::Invalid(e) => {
-                            (false, format!("Signature was invalid: {e:?}"))
-                        }
-                        SignatureState::Unverified { error, subject } => (
-                            false,
-                            format!("Signature was unverified: {subject:?} | {error}"),
-                        ),
-                        SignatureState::Unresolved(e) => {
-                            (false, format!("Signature could not resolve: {e:?}"))
-                        }
-                        SignatureState::Verified(_) => {
-                            (true, "Signature resolved correctly".to_string())
-                        }
-                    };
-
-                    assert!(is_ok, "{msg}");
+                    assert!(
+                        matches!(s, SignatureState::Verified(_)),
+                        "{s:?} verified correctly"
+                    );
                 }
 
                 future::ready(())
             })
             .await;
 
+        assert!(count > 0, "We verified some chunks");
+
+        Ok(())
+    }
+
+    async fn sign_and_verify_multi_together(
+        alice_chunk_size: u32,
+        bob_chunk_size: u32,
+    ) -> Result<(), Box<dyn Error>> {
+        gst::init()?;
+
+        let client = get_client();
+        let issuer = TestIssuer::new(client.clone()).await?;
+        let resolver = get_resolver(client);
+
+        let alice_identity = TestIdentity::new(&issuer, |id| {
+            Subject::from_json_value(json!({
+              "id": id.as_str(),
+              "name": "Alice",
+              "degree": {
+                "type": "BachelorDegree",
+                "name": "Bachelor of Science and Arts",
+              },
+              "GPA": "4.0",
+            }))
+            .expect("Invalid subject")
+        })
+        .await?;
+
+        let bob_identity = TestIdentity::new(&issuer, |id| {
+            Subject::from_json_value(json!({
+              "id": id.as_str(),
+              "name": "Bob",
+              "degree": {
+                "type": "BachelorDegree",
+                "name": "Bachelor of Science and Arts",
+              },
+              "GPA": "4.0",
+            }))
+            .expect("Invalid subject")
+        })
+        .await?;
+
+        let filepath = test_video(videos::BIG_BUNNY);
+
+        let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+        let signfile = pipe
+            .sign_with_all::<sign::IntervalController<TestIdentity>, TestIdentity>(vec![
+                Box::new(sign::IntervalController::build(
+                    Arc::new(alice_identity),
+                    alice_chunk_size,
+                )),
+                Box::new(sign::IntervalController::build(
+                    Arc::new(bob_identity),
+                    bob_chunk_size,
+                )),
+            ])?
+            .try_collect::<SignFile>()
+            .await?;
+
+        let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+        let mut count = 0;
+        pipe.verify(&resolver, &signfile)?
+            .for_each(|v| {
+                count += 1;
+
+                let v = match v {
+                    Ok(v) => v,
+                    Err(e) => {
+                        panic!("Frame was invalid: {e}");
+                    }
+                };
+
+                for s in &v.sigs {
+                    assert!(
+                        matches!(s, SignatureState::Verified(_)),
+                        "{s:?} verified correctly"
+                    );
+                }
+
+                future::ready(())
+            })
+            .await;
+
+        assert!(count > 0, "We verified some chunks");
+
         Ok(())
     }
 
     #[tokio::test]
     async fn sign_and_verify_multi_same() -> Result<(), Box<dyn Error>> {
-        sign_and_verify_multi(100, 100).await
+        sign_and_verify_multi(100, 100).await?;
+        sign_and_verify_multi_together(100, 100).await
     }
 
     #[tokio::test]
     async fn sign_and_verify_multi_diff() -> Result<(), Box<dyn Error>> {
-        sign_and_verify_multi(100, 179).await
+        sign_and_verify_multi(100, 179).await?;
+        sign_and_verify_multi_together(100, 179).await
     }
 
     #[tokio::test]
@@ -668,7 +745,7 @@ mod tests {
         })
         .await?;
 
-        let filepath = test_video(videos::BIG_BUNNY);
+        let filepath = test_video(videos::BIG_BUNNY_LONG);
 
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
@@ -680,10 +757,18 @@ mod tests {
             .try_collect::<Vec<_>>()
             .await;
 
-        match res {
-            Err(FrameError::InvalidChunkSize(size)) => assert_eq!(size, MAX_CHUNK_LENGTH + 1),
-            _ => assert!(false, "Response was unexpected: {res:?}"),
-        }
+        const LENGTH: usize = MAX_CHUNK_LENGTH + 1;
+
+        assert!(
+            matches!(
+                res,
+                Err(SigningError::Operation(
+                    SigOperationError::InvalidChunkSize(LENGTH)
+                ))
+            ),
+            "{:?} reported invalid chunk size of {LENGTH}",
+            res.map(|mut v| v.pop())
+        );
 
         Ok(())
     }
@@ -718,21 +803,520 @@ mod tests {
             .try_collect::<Vec<_>>()
             .await;
 
-        match res {
-            Err(FrameError::InvalidChunkSize(size)) => assert_eq!(size, 4),
-            _ => assert!(false, "Response was unexpected: {res:?}"),
+        const LENGTH: usize = 4;
+
+        assert!(
+            matches!(
+                res,
+                Err(SigningError::Operation(
+                    SigOperationError::InvalidChunkSize(LENGTH)
+                ))
+            ),
+            "{:?} reported an invalid chunk size of {LENGTH}",
+            res.map(|mut v| v.pop())
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sign_and_verify_embedding() -> Result<(), Box<dyn Error>> {
+        sign_and_verify_int(|i| {
+            sign::IntervalController::build(i, 100)
+                .with_embedding(Coord::new(10, 10), Coord::new(100, 100))
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn sign_with_too_large_embedding() -> Result<(), Box<dyn Error>> {
+        gst::init()?;
+
+        let client = get_client();
+        let issuer = TestIssuer::new(client.clone()).await?;
+
+        let identity = Arc::new(
+            TestIdentity::new(&issuer, |id| {
+                Subject::from_json_value(json!({
+                  "id": id.as_str(),
+                  "name": "Alice",
+                  "degree": {
+                    "type": "BachelorDegree",
+                    "name": "Bachelor of Science and Arts",
+                  },
+                  "GPA": "4.0",
+                }))
+                .expect("Invalid subject")
+            })
+            .await?,
+        );
+
+        let filepath = test_video(videos::BIG_BUNNY);
+
+        for size in [(1000, 50), (50, 1000), (1000, 1000)]
+            .into_iter()
+            .map(Coord::from)
+        {
+            let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+            let ctrl = sign::IntervalController::build(identity.clone(), 100)
+                .with_embedding(Coord::new(0, 0), size);
+
+            let res = pipe.sign_with(ctrl)?.try_collect::<SignFile>().await;
+
+            const POS: Coord = Coord::new(0, 0);
+
+            assert!(
+                matches!(
+                    res,
+                    Err(SigningError::Operation(SigOperationError::InvalidCrop(
+                        POS, esize
+                    ))) if esize == size
+                ),
+                "{:?} responded as an invalid crop of position {POS:?} and size {size:?}",
+                res.map(|s| s.iter().next())
+            );
         }
 
         Ok(())
     }
 
+    #[tokio::test]
+    async fn sign_with_too_small_embedding() -> Result<(), Box<dyn Error>> {
+        gst::init()?;
+
+        let client = get_client();
+        let issuer = TestIssuer::new(client.clone()).await?;
+
+        let identity = Arc::new(
+            TestIdentity::new(&issuer, |id| {
+                Subject::from_json_value(json!({
+                  "id": id.as_str(),
+                  "name": "Alice",
+                  "degree": {
+                    "type": "BachelorDegree",
+                    "name": "Bachelor of Science and Arts",
+                  },
+                  "GPA": "4.0",
+                }))
+                .expect("Invalid subject")
+            })
+            .await?,
+        );
+
+        let filepath = test_video(videos::BIG_BUNNY);
+
+        for size in [(0, 50), (50, 0), (0, 0)].into_iter().map(Coord::from) {
+            let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+            let ctrl = sign::IntervalController::build(identity.clone(), 100)
+                .with_embedding(Coord::new(0, 0), size);
+
+            let res = pipe.sign_with(ctrl)?.try_collect::<SignFile>().await;
+
+            const POS: Coord = Coord::new(0, 0);
+            assert!(
+                matches!(
+                    res,
+                    Err(SigningError::Operation(SigOperationError::InvalidCrop(
+                        POS, esize
+                    ))) if esize == size
+                ),
+                "{:?} responded as an invalid crop of position {POS:?} and size {size:?}",
+                res.map(|s| s.iter().next())
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sign_with_too_large_position() -> Result<(), Box<dyn Error>> {
+        gst::init()?;
+
+        let client = get_client();
+        let issuer = TestIssuer::new(client.clone()).await?;
+
+        let identity = Arc::new(
+            TestIdentity::new(&issuer, |id| {
+                Subject::from_json_value(json!({
+                  "id": id.as_str(),
+                  "name": "Alice",
+                  "degree": {
+                    "type": "BachelorDegree",
+                    "name": "Bachelor of Science and Arts",
+                  },
+                  "GPA": "4.0",
+                }))
+                .expect("Invalid subject")
+            })
+            .await?,
+        );
+
+        let filepath = test_video(videos::BIG_BUNNY);
+
+        for pos in [(1000, 50), (50, 1000), (1000, 1000)]
+            .into_iter()
+            .map(Coord::from)
+        {
+            let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+            let ctrl = sign::IntervalController::build(identity.clone(), 100)
+                .with_embedding(pos, Coord::new(1, 1));
+
+            let res = pipe.sign_with(ctrl)?.try_collect::<SignFile>().await;
+
+            const SIZE: Coord = Coord::new(1, 1);
+            assert!(
+                matches!(
+                    res,
+                    Err(SigningError::Operation(SigOperationError::InvalidCrop(
+                        epos, SIZE
+                    ))) if epos == pos
+                ),
+                "{:?} responded as an invalid crop of position {pos:?} and size {SIZE:?}",
+                res.map(|s| s.iter().next())
+            );
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn verify_with_invalid_embedding() -> Result<(), Box<dyn Error>> {
+        gst::init()?;
+
+        let client = get_client();
+        let issuer = TestIssuer::new(client.clone()).await?;
+        let resolver = get_resolver(client);
+
+        let identity = TestIdentity::new(&issuer, |id| {
+            Subject::from_json_value(json!({
+              "id": id.as_str(),
+              "name": "Alice",
+              "degree": {
+                "type": "BachelorDegree",
+                "name": "Bachelor of Science and Arts",
+              },
+              "GPA": "4.0",
+            }))
+            .expect("Invalid subject")
+        })
+        .await?;
+
+        let filepath = test_video(videos::BIG_BUNNY);
+
+        let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+        let signs = pipe
+            .sign_with(sign::IntervalController::build(Arc::new(identity), 100))?
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        for size in [
+            (0, 50),
+            (50, 0),
+            (0, 0),
+            (1000, 50),
+            (50, 1000),
+            (1000, 1000),
+        ]
+        .into_iter()
+        .map(Coord::from)
+        {
+            // Secretly just change the size as technically we won't get to the
+            // verification stage
+            let signfile = signs
+                .iter()
+                .cloned()
+                .map(|mut i| {
+                    for c in i.val.iter_mut() {
+                        c.size = size;
+                    }
+                    i
+                })
+                .collect::<SignFile>();
+
+            let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+            let mut count = 0;
+            pipe.verify(&resolver, &signfile)?
+                .for_each(|v| {
+                    count += 1;
+
+                    let v = match v {
+                        Ok(v) => v,
+                        Err(e) => {
+                            panic!("Frame was invalid: {e}");
+                        }
+                    };
+
+                    for s in &v.sigs {
+                        assert!(
+                            matches!(
+                                s,
+                                SignatureState::Invalid(
+                                    InvalidSignatureError::Operation(
+                                        SigOperationError::InvalidCrop(
+                                            Coord { x: 0, y: 0},
+                                            esize,
+                                        ),
+                                    ),
+                                ) if *esize == size
+                            ),
+                            "{s:?} marks itself as an invalid crop with size {size:?}"
+                        );
+                    }
+
+                    future::ready(())
+                })
+                .await;
+
+            assert!(count > 0, "We verified some chunks");
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn verify_with_invalid_pos() -> Result<(), Box<dyn Error>> {
+        gst::init()?;
+
+        let client = get_client();
+        let issuer = TestIssuer::new(client.clone()).await?;
+        let resolver = get_resolver(client);
+
+        let identity = TestIdentity::new(&issuer, |id| {
+            Subject::from_json_value(json!({
+              "id": id.as_str(),
+              "name": "Alice",
+              "degree": {
+                "type": "BachelorDegree",
+                "name": "Bachelor of Science and Arts",
+              },
+              "GPA": "4.0",
+            }))
+            .expect("Invalid subject")
+        })
+        .await?;
+
+        let filepath = test_video(videos::BIG_BUNNY);
+
+        let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+        let signs = pipe
+            .sign_with(sign::IntervalController::build(Arc::new(identity), 100))?
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        for pos in [(1000, 50), (50, 1000), (1000, 1000)]
+            .into_iter()
+            .map(Coord::from)
+        {
+            // Secretly just change the pos as technically we won't get to the
+            // verification stage
+            let signfile = signs
+                .iter()
+                .cloned()
+                .map(|mut i| {
+                    for c in i.val.iter_mut() {
+                        c.size = Coord::new(1, 1);
+                        c.pos = pos;
+                    }
+                    i
+                })
+                .collect::<SignFile>();
+
+            let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+            let mut count = 0;
+            pipe.verify(&resolver, &signfile)?
+                .for_each(|v| {
+                    count += 1;
+
+                    let v = match v {
+                        Ok(v) => v,
+                        Err(e) => {
+                            panic!("Frame was invalid: {e}");
+                        }
+                    };
+
+                    for s in &v.sigs {
+                        assert!(
+                            matches!(
+                                s,
+                                SignatureState::Invalid(
+                                    InvalidSignatureError::Operation(
+                                        SigOperationError::InvalidCrop(
+                                            epos,
+                                            Coord { x: 1, y: 1},
+                                        ),
+                                    ),
+                                ) if *epos == pos
+                            ),
+                            "{s:?} marks itself as an invalid crop with position {pos:?}"
+                        );
+                    }
+
+                    future::ready(())
+                })
+                .await;
+
+            assert!(count > 0, "We verified some chunks");
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn verify_with_invalid_chunk_length() -> Result<(), Box<dyn Error>> {
+        gst::init()?;
+
+        // TODO: This is like really slow
+        let client = get_client();
+        let issuer = TestIssuer::new(client.clone()).await?;
+        let resolver = get_resolver(client);
+
+        let identity = TestIdentity::new(&issuer, |id| {
+            Subject::from_json_value(json!({
+              "id": id.as_str(),
+              "name": "Alice",
+              "degree": {
+                "type": "BachelorDegree",
+                "name": "Bachelor of Science and Arts",
+              },
+              "GPA": "4.0",
+            }))
+            .expect("Invalid subject")
+        })
+        .await?;
+
+        let filepath = test_video(videos::BIG_BUNNY_LONG);
+
+        let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+        let signs = pipe
+            .sign_with(sign::IntervalController::build(Arc::new(identity), 100))?
+            .try_collect::<Vec<_>>()
+            .await?;
+
+        for length in [MIN_CHUNK_LENGTH - 1, MAX_CHUNK_LENGTH + 1] {
+            // Secretly just change the length as technically we won't get to the
+            // verification stage
+            let signfile = signs
+                .iter()
+                .cloned()
+                .map(|mut i| {
+                    i.stop = i.start + length as u32;
+                    i
+                })
+                .collect::<SignFile>();
+
+            let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+            let mut count = 0;
+            pipe.verify(&resolver, &signfile)?
+                .for_each(|v| {
+                    count += 1;
+
+                    let v = match v {
+                        Ok(v) => v,
+                        Err(e) => {
+                            panic!("Frame was invalid: {e}");
+                        }
+                    };
+
+                    for s in &v.sigs {
+                        assert!(
+                            matches!(
+                                s,
+                                SignatureState::Invalid(
+                                    InvalidSignatureError::Operation(
+                                        SigOperationError::InvalidChunkSize(
+                                            elength,
+                                        ),
+                                    ),
+                                ) if *elength == length
+                            ),
+                            "{s:?} marks itself as an invalid chunk length with length {length}ms"
+                        );
+                    }
+
+                    future::ready(())
+                })
+                .await;
+
+            assert!(count > 0, "We verified some chunks");
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn verify_unresolvable() -> Result<(), Box<dyn Error>> {
+        gst::init()?;
+
+        let client = get_client();
+        let issuer = TestIssuer::new(client.clone()).await?;
+
+        let identity = TestIdentity::new(&issuer, |id| {
+            Subject::from_json_value(json!({
+              "id": id.as_str(),
+              "name": "Alice",
+              "degree": {
+                "type": "BachelorDegree",
+                "name": "Bachelor of Science and Arts",
+              },
+              "GPA": "4.0",
+            }))
+            .expect("Invalid subject")
+        })
+        .await?;
+
+        let filepath = test_video(videos::BIG_BUNNY);
+
+        let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+        let signfile = pipe
+            .sign_with(sign::IntervalController::build(Arc::new(identity), 100))?
+            .try_collect::<SignFile>()
+            .await?;
+
+        // Use a separate client for verification so that it has no knowledge
+        // of the created identity
+        let vclient = get_client();
+        let resolver = get_resolver(vclient);
+        let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+        let mut count = 0;
+        pipe.verify(&resolver, &signfile)?
+            .for_each(|v| {
+                count += 1;
+
+                let v = match v {
+                    Ok(v) => v,
+                    Err(e) => {
+                        panic!("Frame was invalid: {e}");
+                    }
+                };
+
+                for s in &v.sigs {
+                    assert!(
+                        matches!(s, SignatureState::Unresolved(_)),
+                        "{s:?} was unresolved"
+                    );
+                }
+
+                future::ready(())
+            })
+            .await;
+
+        assert!(count > 0, "We verified some chunks");
+
+        Ok(())
+    }
+
     // TODO:
-    // - Try to verify chunk > MAX_BUFFER_SIZE or too short
-    // - Try to sign + verify embedding
-    //   - Sign with embedding that goes out of range
-    // - Sign with multiple signatures (same intersections + different intersections), without two
-    //   different calls
-    // - Verify with stuff which doesn't resolve
-    // - Verify with invalid signatures
-    // - Verify with invalid issuer????
+    // - Sign + Verify with start offset
+    // - Sign + Verify with range
 }

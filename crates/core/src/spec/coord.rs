@@ -11,3 +11,9 @@ impl Coord {
         Self { x, y }
     }
 }
+
+impl From<(u32, u32)> for Coord {
+    fn from((x, y): (u32, u32)) -> Self {
+        Self::new(x, y)
+    }
+}

@@ -83,6 +83,10 @@ impl TimeRange {
     pub fn is_start(&self) -> bool {
         self.contains(0)
     }
+
+    pub fn is_first(&self) -> bool {
+        self.start < self.frame_duration()
+    }
 }
 
 impl RangeBounds<f64> for TimeRange {

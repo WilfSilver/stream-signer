@@ -1,9 +1,7 @@
 //! This contains the different structures that we may want to store about a
 //! frame.
 
-use std::ops::{Bound, Range, RangeBounds, Rem};
-
-use crate::{file::Timestamp, utils::TimeRange};
+use crate::utils::TimeRange;
 
 use super::{Frame, Framerate};
 
@@ -24,16 +22,14 @@ pub struct FrameInfo {
 }
 
 impl FrameInfo {
-    pub(crate) fn new(
-        frame: Frame,
-        timestamp: Timestamp,
-        frame_idx: usize,
-        fps: Framerate<usize>,
-    ) -> Self {
+    pub(crate) fn new(frame: Frame, frame_idx: usize, fps: Framerate<usize>, offset: f64) -> Self {
+        let fps: Framerate<f64> = fps.into();
+        let exact_time = offset + fps.convert_to_ms(frame_idx);
+
         Self {
             frame,
             frame_idx,
-            time: TimeRange::new(timestamp, fps.seconds() as f64 / fps.frames() as f64),
+            time: TimeRange::new(exact_time, fps.milliseconds() / fps.frames()),
         }
     }
 
