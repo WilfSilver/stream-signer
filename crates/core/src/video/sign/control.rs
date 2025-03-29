@@ -62,7 +62,8 @@ impl<S: Signer> IntervalController<S> {
 impl<S: Signer> Controller<S> for IntervalController<S> {
     fn get_chunk(&mut self, info: &FrameInfo) -> Option<ChunkSigner<S>> {
         let time = self.convert_time(info.time)?;
-        if !time.is_start() && time % self.interval == 0 {
+        println!("{time:?}");
+        if !time.is_start() && (time % self.interval).is_first() {
             let mut res = ChunkSigner::new(
                 info.time.start() - self.interval,
                 self.signer.clone(),

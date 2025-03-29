@@ -80,6 +80,8 @@ impl<VC> FusedIterator for FrameIter<VC> {}
 impl<VC> Iterator for FrameIter<VC> {
     type Item = Result<Frame, glib::Error>;
 
+    // TODO: Somehow figure if we are on the last frame + pass it down
+
     fn next(&mut self) -> Option<Self::Item> {
         // Required for FusedIterator
         if self.fused {
@@ -98,16 +100,16 @@ impl<VC> Iterator for FrameIter<VC> {
 
         let sample = appsink.try_pull_sample(self.timeout);
         match sample {
-            //If a frame was extracted then return it.
+            // If a frame was extracted then return it.
             Some(sample) => Some(Ok(sample.into())),
 
             None => {
                 // Make sure no more frames can be drawn if next is called again
                 self.fused = true;
 
-                //if no sample was returned then we might have hit the timeout.
-                //If so check for any possible error being written into the log
-                //at that time
+                // If no sample was returned then we might have hit the timeout.
+                // If so check for any possible error being written into the log
+                // at that time
                 let ret = match Self::try_find_error(&bus) {
                     Some(error) => Some(Err(error)),
                     _ => {

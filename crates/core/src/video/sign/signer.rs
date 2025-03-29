@@ -157,7 +157,7 @@ impl<S: Signer> Clone for ChunkSigner<S> {
     }
 }
 
-#[cfg(any(test, feature = "testlibs"))]
+#[cfg(any(test, doctest, feature = "testlibs"))]
 mod testlib_extras {
     use super::*;
     use identity_iota::{

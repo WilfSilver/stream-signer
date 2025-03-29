@@ -104,13 +104,13 @@ impl Subject {
 type IntMap = HashMap<String, SubjectState>;
 
 /// Stores the defined credentials so it can be easily accessed later on
-#[derive(Debug, Default)]
-pub struct CredentialStore {
-    resolver: Resolver,
+#[derive(Debug)]
+pub struct CredentialStore<'a> {
+    resolver: &'a Resolver,
     map: IntMap,
 }
 
-impl CredentialStore {
+impl<'a> CredentialStore<'a> {
     /// Creates a new [CredentialStore] with the given [Resolver].
     ///
     /// ## Example
@@ -136,7 +136,7 @@ impl CredentialStore {
     /// let mut resolver = Resolver::new();
     /// resolver.attach_iota_handler(client);
     ///
-    /// let store = CredentialStore::new(resolver);
+    /// let store = CredentialStore::new(&resolver);
     ///
     /// # Ok(())
     /// # }
@@ -179,9 +179,9 @@ impl CredentialStore {
     ///   async move { future_client.resolve(&did).await }
     /// });
     ///
-    /// let store = CredentialStore::new(resolver);
+    /// let store = CredentialStore::new(&resolver);
     /// ```
-    pub fn new(resolver: Resolver) -> Self {
+    pub fn new(resolver: &'a Resolver) -> Self {
         Self {
             resolver,
             map: HashMap::default(),
@@ -282,7 +282,7 @@ impl CredentialStore {
     }
 }
 
-impl Deref for CredentialStore {
+impl Deref for CredentialStore<'_> {
     type Target = IntMap;
     fn deref(&self) -> &Self::Target {
         &self.map

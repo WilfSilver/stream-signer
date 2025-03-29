@@ -11,14 +11,14 @@ use thiserror::Error;
 
 use crate::utils::{Subject, SubjectState, UnknownKey};
 
-use super::FrameInfo;
+use super::{FrameInfo, SigOperationError};
 
 #[derive(Debug, Error, Clone)]
 pub enum InvalidSignatureError {
     #[error("Invalid JWT object: {0:?}")]
     Jwt(Vec<Arc<JwtValidationError>>),
     #[error(transparent)]
-    UnknownRef(#[from] UnknownKey),
+    Operation(#[from] SigOperationError),
 }
 
 #[derive(Debug, Clone)]
@@ -39,7 +39,7 @@ impl SignatureState {
     ) -> Self {
         let signer = match signer {
             Ok(s) => s,
-            Err(e) => return Self::Invalid(InvalidSignatureError::UnknownRef(e)),
+            Err(e) => return Self::Invalid(InvalidSignatureError::Operation(e.into())),
         };
 
         let verifier = EdDSAJwsVerifier::default();

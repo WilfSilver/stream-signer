@@ -33,7 +33,7 @@ impl Timestamp {
 
     /// Creates a timestamp from the frame index, when given the frame rate
     ///
-    /// TODO: Check the start offset is correct
+    /// TODO: Check how accurate the start offset is correct
     ///
     /// - `fps` should be: (number of frames, number of seconds)
     /// - `start_offset` should be the number of milliseconds to start the video at
@@ -74,6 +74,12 @@ impl From<u32> for Timestamp {
 impl From<f64> for Timestamp {
     fn from(value: f64) -> Self {
         Timestamp(value as u32)
+    }
+}
+
+impl From<Timestamp> for usize {
+    fn from(value: Timestamp) -> Self {
+        *value as usize
     }
 }
 

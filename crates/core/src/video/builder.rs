@@ -197,7 +197,13 @@ impl SignPipelineBuilder<'_> {
                 .unwrap_or(&convert)
                 .static_pad(&sn)
                 .expect("Could not get expected sink");
-            pad.link(&first_pad).expect("Could not link pad to appsink");
+
+            // Only link the pad once
+            if !pad.is_linked() && !first_pad.is_linked() {
+                pad.link(&first_pad).expect("Could not link pad to appsink");
+            } else {
+                println!("Pads are already linked")
+            }
 
             println!(
                 "Duration: {}",
