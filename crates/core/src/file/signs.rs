@@ -11,7 +11,7 @@ use crate::spec::ChunkSignature;
 use super::{ParseError, Timestamp};
 
 /// TODO: Remove the Vec because it seems to be much much slower
-type RawSignedInterval = Interval<u32, Vec<ChunkSignature>>;
+type RawSignedInterval = Interval<u32, ChunkSignature>;
 
 /// Wrapper type for the Interval storing the time range and signatures which
 /// have signed that interval of video
@@ -19,7 +19,7 @@ type RawSignedInterval = Interval<u32, Vec<ChunkSignature>>;
 pub struct SignedInterval(RawSignedInterval);
 
 impl SignedInterval {
-    pub fn new(from: Timestamp, to: Timestamp, signature: Vec<ChunkSignature>) -> Self {
+    pub fn new(from: Timestamp, to: Timestamp, signature: ChunkSignature) -> Self {
         SignedInterval(RawSignedInterval {
             start: from.into(),
             stop: to.into(),
@@ -135,7 +135,7 @@ impl<'a> SignedChunk<'a> {
 /// ```
 ///
 #[derive(Debug)]
-pub struct SignFile(Lapper<u32, Vec<ChunkSignature>>);
+pub struct SignFile(Lapper<u32, ChunkSignature>);
 
 impl SignFile {
     pub fn new() -> Self {
@@ -213,11 +213,9 @@ impl SignFile {
     /// ```
     ///
     pub fn get_signatures_at(&self, at: Timestamp) -> impl Iterator<Item = SignedChunk<'_>> {
-        self.0.find(at.into(), at.into()).flat_map(|i| {
-            i.val
-                .iter()
-                .map(|s| SignedChunk::new(i.start.into()..i.stop.into(), s))
-        })
+        self.0
+            .find(at.into(), at.into())
+            .map(|i| SignedChunk::new(i.start.into()..i.stop.into(), &i.val))
     }
 
     /// Iterates over all the `SignedInterval`s stored in the tree, note this is

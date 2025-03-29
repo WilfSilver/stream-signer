@@ -398,6 +398,7 @@ mod signing {
             S: Signer + 'static,
             F: FnMut(FrameInfo) -> ITER,
             ITER: IntoIterator<Item = ChunkSigner<S>>,
+            <ITER as IntoIterator>::IntoIter: Send,
         {
             let sign_with = Mutex::new(sign_with);
             let context = SigningContext { sign_with };
@@ -1030,9 +1031,7 @@ mod tests {
                 .iter()
                 .cloned()
                 .map(|mut i| {
-                    for c in i.val.iter_mut() {
-                        c.size = size;
-                    }
+                    i.val.size = size;
                     i
                 })
                 .collect::<SignFile>();
@@ -1119,10 +1118,8 @@ mod tests {
                 .iter()
                 .cloned()
                 .map(|mut i| {
-                    for c in i.val.iter_mut() {
-                        c.size = Coord::new(1, 1);
-                        c.pos = pos;
-                    }
+                    i.val.size = Coord::new(1, 1);
+                    i.val.pos = pos;
                     i
                 })
                 .collect::<SignFile>();

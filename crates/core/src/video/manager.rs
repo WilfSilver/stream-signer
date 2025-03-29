@@ -251,19 +251,13 @@ pub mod sign {
     //! Contains specific implementation of [super::PipeManager] which is for
     //! signing
 
-    use std::{
-        collections::{HashMap, VecDeque},
-        future::Future,
-        pin::Pin,
-    };
+    use std::{collections::VecDeque, future::Future, pin::Pin};
 
-    use futures::{stream, Stream, StreamExt};
+    use futures::{stream, Stream, StreamExt, TryFutureExt};
     use identity_iota::storage::JwkStorageDocumentError;
-    use tokio::task::JoinSet;
 
     use crate::{
         file::SignedInterval,
-        spec::ChunkSignature,
         video::{ChunkSigner, FrameInfo, Signer, SigningError},
     };
 
@@ -369,7 +363,7 @@ pub mod sign {
             signer: ChunkSigner<S>,
             start_offset: f64,
         ) -> Result<
-            impl Future<Output = Result<ChunkSignature, JwkStorageDocumentError>>,
+            impl Future<Output = Result<SignedInterval, JwkStorageDocumentError>>,
             SigOperationError,
         >
         where
@@ -390,7 +384,12 @@ pub mod sign {
                 start_idx..self.context.len(),
             )?;
 
-            Ok(signer.sign(buf, default_size))
+            let start = signer.start;
+            let end = self.timestamp;
+
+            Ok(signer
+                .sign(buf, default_size)
+                .and_then(move |res| async move { Ok(SignedInterval::new(start, end, res)) }))
         }
     }
 
@@ -417,47 +416,19 @@ pub mod sign {
         ) -> Pin<Box<dyn Stream<Item = Result<SignedInterval, SigningError>> + Send>> {
             let sign_info = self.request_sign_info().await;
 
-            type SigInfoReturn = Result<ChunkSignature, JwkStorageDocumentError>;
-
-            let mut chunks: HashMap<Timestamp, JoinSet<SigInfoReturn>> = HashMap::new();
-            for si in sign_info.into_iter() {
-                // TODO: Add protections if the timeframe is too short/long
-                let start = si.start;
-
-                let fut = self.frame.sign(si, self.state.offset);
-
-                let fut = match fut {
-                    Ok(f) => f,
-                    Err(e) => return Box::pin(stream::iter([Err(e.into())])),
-                };
-
-                match chunks.get_mut(&start) {
-                    Some(c) => {
-                        c.spawn(fut);
-                    }
-                    None => {
-                        let mut sigs = JoinSet::new();
-                        sigs.spawn(fut);
-                        chunks.insert(start, sigs);
-                    }
+            let res = stream::iter(
+                sign_info
+                    .into_iter()
+                    .map(|si| self.frame.sign(si, self.state.offset))
+                    // Collect into a vector so we don't have to deal with
+                    // lifetimes even more
+                    .collect::<Vec<_>>(),
+            )
+            .then(|res| async {
+                match res {
+                    Ok(fut) => fut.await.map_err(SigningError::from),
+                    Err(e) => Err(e.into()),
                 }
-            }
-
-            // This logic was mostly used to help try and speed up the signing process
-            // slightly and hopefully make it so it didn't interrupt the stream, although
-            // the current implementation doesn't really help it's just kinda left over
-            let timestamp = self.frame.timestamp;
-            let res = stream::iter(chunks).then(move |(start, futures)| async move {
-                futures.join_all().await.into_iter().try_fold(
-                    SignedInterval::new(start, timestamp, vec![]),
-                    |mut curr, signature| match signature {
-                        Ok(sig) => {
-                            curr.val.push(sig);
-                            Ok(curr)
-                        }
-                        Err(e) => Err(e.into()),
-                    },
-                )
             });
 
             Box::pin(res)
