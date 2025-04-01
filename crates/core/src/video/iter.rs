@@ -8,7 +8,7 @@ use std::{iter::FusedIterator, sync::Arc};
 use gst::{CoreError, MessageView};
 
 use super::{
-    manager::{into_glib_error, PipeState},
+    manager::{into_glib_error, PipeInitiator, PipeState},
     Frame,
 };
 
@@ -32,14 +32,9 @@ pub struct FrameIter<VC> {
 pub type SampleWithState<VC> = (Arc<PipeState<VC>>, Result<Frame, glib::Error>);
 
 impl<VC> FrameIter<VC> {
-    pub fn new<S: ToString>(
-        pipeline: gst::Pipeline,
-        sink: S,
-        offset: Option<f64>,
-        context: VC,
-    ) -> Result<Self, glib::Error> {
+    pub fn new(init: PipeInitiator, context: VC) -> Result<Self, glib::Error> {
         Ok(Self {
-            state: Arc::new(PipeState::new(pipeline, sink, offset, context)?),
+            state: Arc::new(PipeState::new(init, context)?),
             timeout: 30 * gst::ClockTime::SECOND,
             fused: false,
         })
