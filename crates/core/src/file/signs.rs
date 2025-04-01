@@ -10,7 +10,6 @@ use crate::spec::ChunkSignature;
 
 use super::{ParseError, Timestamp};
 
-/// TODO: Remove the Vec because it seems to be much much slower
 type RawSignedInterval = Interval<u32, ChunkSignature>;
 
 /// Wrapper type for the Interval storing the time range and signatures which

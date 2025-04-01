@@ -1,9 +1,8 @@
-use gst::Pipeline;
 use std::path::Path;
 
 use crate::time::ONE_SECOND_MILLIS;
 
-use super::{builder::SignPipelineBuilder, iter::FrameIter, StreamError};
+use super::{builder::SignPipelineBuilder, iter::FrameIter, manager::PipeInitiator, StreamError};
 
 pub const MAX_CHUNK_LENGTH: usize = 10 * ONE_SECOND_MILLIS as usize;
 pub const MIN_CHUNK_LENGTH: usize = 50;
@@ -12,18 +11,12 @@ pub const MIN_CHUNK_LENGTH: usize = 50;
 /// sign and verify a stream.
 #[derive(Debug)]
 pub struct SignPipeline {
-    pipe: Pipeline,
-    start_offset: Option<f64>,
-    sink: String,
+    init: PipeInitiator,
 }
 
 impl SignPipeline {
-    pub(crate) fn new(pipe: Pipeline, start_offset: Option<f64>, sink: String) -> Self {
-        Self {
-            pipe,
-            start_offset,
-            sink,
-        }
+    pub(crate) fn new(init: PipeInitiator) -> Self {
+        Self { init }
     }
 
     /// Uses the builder API to create a Pipeline
@@ -40,7 +33,7 @@ impl SignPipeline {
     ///
     /// Parts of this function was inspired by [`vid_frame_iter`](https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter)
     pub fn try_into_iter<VC>(self, context: VC) -> Result<FrameIter<VC>, StreamError> {
-        let pipeline = FrameIter::new(self.pipe, &self.sink, self.start_offset, context)?;
+        let pipeline = FrameIter::new(self.init, context)?;
 
         pipeline.play()?;
         Ok(pipeline)
@@ -136,8 +129,9 @@ mod verifying {
         /// it was set to
         fn set_clock_unsynced(&self) -> bool {
             let appsink = self
+                .init
                 .pipe
-                .by_name(&self.sink)
+                .by_name(&self.init.video_sink)
                 .expect("Sink element not found")
                 .downcast::<gst_app::AppSink>()
                 .expect("Sink element is expected to be an appsink!");

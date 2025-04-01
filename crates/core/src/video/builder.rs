@@ -6,10 +6,10 @@ use glib::object::ObjectExt;
 use gst::{
     element_factory::ElementBuilder,
     prelude::{ElementExt, ElementExtManual, GstBinExtManual, PadExt},
-    Element, ElementFactory, Pipeline,
+    Element, ElementFactory,
 };
 
-use super::SignPipeline;
+use super::{manager::PipeInitiator, SignPipeline};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub enum FramerateOption {
@@ -158,15 +158,12 @@ impl SignPipelineBuilder<'_> {
     /// Puts all the arguments into the [SignPipeline] object to then be used
     /// later
     pub fn build(self) -> Result<SignPipeline, BuilderError> {
-        let start = self.start_offset;
-        let (pipe, sink) = self.build_raw_pipeline()?;
-        // TODO: Pass sink name
-        Ok(SignPipeline::new(pipe, start, sink))
+        Ok(SignPipeline::new(self.build_raw_pipeline()?))
     }
 
     /// Converts this object into a [Pipeline] with the sink name it is using
     /// for the frames
-    fn build_raw_pipeline(self) -> Result<(Pipeline, String), BuilderError> {
+    fn build_raw_pipeline(self) -> Result<PipeInitiator, BuilderError> {
         // TODO: Swap to use playbin https://gstreamer.freedesktop.org/documentation/tutorials/playback/playbin-usage.html?gi-language=c
 
         // Create the pipeline and add elements
@@ -176,21 +173,21 @@ impl SignPipelineBuilder<'_> {
             .field("format", gst_video::VideoFormat::Rgb.to_string())
             .build();
         let sink = self.sink.property("caps", caps).build()?;
-        let sink_name = sink.property::<String>("name");
+        let video_sink = sink.property::<String>("name");
         let extras = self.extras?;
 
-        let pipeline = gst::Pipeline::new();
+        let pipe = gst::Pipeline::new();
         let chain = [&src]
             .into_iter()
             .chain(extras.iter())
             .chain([&convert, &sink]);
 
-        pipeline.add_many(chain.clone())?;
+        pipe.add_many(chain.clone())?;
         // We dynamically link the source later on
         Element::link_many(chain.skip(1))?;
 
         // Connect the 'pad-added' signal to dynamically link the source to the converter
-        let sn = sink_name.clone();
+        let sn = video_sink.clone();
         src.connect_pad_added(move |src, pad| {
             let first_pad = extras
                 .first()
@@ -211,6 +208,10 @@ impl SignPipelineBuilder<'_> {
             );
         });
 
-        Ok((pipeline, sink_name))
+        Ok(PipeInitiator {
+            pipe,
+            video_sink,
+            offset: self.start_offset.unwrap_or_default(),
+        })
     }
 }

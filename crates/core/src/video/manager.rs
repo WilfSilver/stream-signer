@@ -113,6 +113,13 @@ impl<VC, FC> PipeManager<VC, FC> {
 }
 
 #[derive(Debug)]
+pub struct PipeInitiator {
+    pub pipe: Pipeline,
+    pub offset: f64,
+    pub video_sink: String,
+}
+
+#[derive(Debug)]
 pub struct PipeState<VC> {
     /// The raw gstreamer pipelien
     pub pipe: Pipeline,
@@ -122,7 +129,7 @@ pub struct PipeState<VC> {
     pub context: VC,
 
     /// The name of the sink element created while building the pipeline
-    pub sink: String,
+    pub video_sink: String,
 }
 
 impl<VC> Drop for PipeState<VC> {
@@ -133,23 +140,18 @@ impl<VC> Drop for PipeState<VC> {
 
 impl<VC> PipeState<VC> {
     /// Creates a new pipeline state
-    pub fn new<S: ToString>(
-        pipe: Pipeline,
-        sink: S,
-        offset: Option<f64>,
-        context: VC,
-    ) -> Result<Self, glib::Error> {
+    pub fn new(init: PipeInitiator, context: VC) -> Result<Self, glib::Error> {
         let state = Self {
-            sink: sink.to_string(),
-            pipe,
-            offset: offset.unwrap_or_default(), // TODO: Test if this is necessary
+            video_sink: init.video_sink,
+            pipe: init.pipe,
+            offset: init.offset, // TODO: Test if this is necessary
             context,
         };
 
         state.pause()?;
 
-        if let Some(skip_amount) = offset {
-            state.seek_accurate(skip_amount)?;
+        if init.offset > 0.0 {
+            state.seek_accurate(init.offset)?;
         }
 
         Ok(state)
@@ -189,7 +191,7 @@ impl<VC> PipeState<VC> {
     /// This is assumed to never fail, relying on the setup to be correct
     pub fn get_sink(&self) -> AppSink {
         self.pipe
-            .by_name(&self.sink)
+            .by_name(&self.video_sink)
             .expect("Sink element not found")
             .downcast::<gst_app::AppSink>()
             .expect("Sink element is expected to be an appsink!")
@@ -374,7 +376,6 @@ pub mod sign {
                 return Err(SigOperationError::InvalidChunkSize(length));
             }
 
-            // TODO: Check if the range is valid
             let start_idx = self.get_chunk_start(signer.start, start_offset)?;
             let default_size = self.size();
 
@@ -527,7 +528,6 @@ pub mod verification {
 
         /// Verifies a single chunk
         async fn verify_sig(&self, chunk: &SignedChunk<'a>) -> SignatureState {
-            // TODO: Check if the end frame is after 10 second mark
             let end_frame =
                 self.convert_to_frames(chunk.range.end) - self.convert_to_frames(chunk.range.start);
 
@@ -569,13 +569,7 @@ pub mod verification {
             Box::new(
                 vec![&self.raw]
                     .into_iter()
-                    .chain(self.context[range].iter().map(|a| {
-                        // TODO: Check this
-                        // It is safe to unwrap here due to the previous
-                        // checks on the frames
-                        let res = a.1.as_ref().unwrap();
-                        res
-                    })),
+                    .chain(self.context[range].iter().filter_map(|a| a.1.as_ref().ok())),
             )
         }
     }
