@@ -1,6 +1,8 @@
 //! This contains the different structures that we may want to store about a
 //! frame.
 
+use super::Pipeline;
+
 use crate::utils::TimeRange;
 
 use crate::video::manager::SrcInfo;
@@ -17,6 +19,10 @@ pub struct FrameState {
     /// Stores information about the video itself
     pub video: SrcInfo,
 
+    /// This allows you to directly interact and query the pipeline (and
+    /// pause it if needed)
+    pub pipe: Pipeline,
+
     /// Stores the frame itself, it is okay to clone the frame due to the fact
     /// [Frame::clone] does not clone the underlying object
     pub frame: Frame,
@@ -29,6 +35,7 @@ pub struct FrameState {
 impl FrameState {
     pub(crate) fn new(
         video: SrcInfo,
+        pipe: Pipeline,
         frame: Frame,
         frame_idx: usize,
         fps: Framerate<usize>,
@@ -38,6 +45,7 @@ impl FrameState {
         let exact_time = offset + fps.convert_to_ms(frame_idx);
 
         Self {
+            pipe,
             video,
             frame,
             frame_idx,

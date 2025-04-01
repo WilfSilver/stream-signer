@@ -1,0 +1,119 @@
+use gst::{
+    prelude::{ElementExt, ElementExtManual},
+    ClockTime, CoreError, MessageView, SeekFlags, StateChangeSuccess,
+};
+
+/// This is a friendly wrapper around [gst::Pipeline]
+///
+/// Note this does not implement [Drop] so that it can be cloned and
+/// shared, you are expected to run [Self::close] when you want to drop
+#[derive(Debug, Clone)]
+pub struct Pipeline(pub(super) gst::Pipeline);
+
+impl Pipeline {
+    pub const fn raw(&self) -> &gst::Pipeline {
+        &self.0
+    }
+
+    /// Sets the pipeline to the [gst::State::Paused] state
+    pub fn pause(&self) -> Result<(), glib::Error> {
+        self.set_state_blocking(gst::State::Paused)
+    }
+
+    /// Sets the pipeline to the [gst::State::Playing] state
+    pub fn play(&self) -> Result<(), glib::Error> {
+        self.set_state_blocking(gst::State::Playing)
+    }
+
+    /// Sets the pipeline to the [gst::State::Null] state
+    ///
+    /// This is required to stop any memory leaks when the pipeline ends
+    pub fn close(&self) -> Result<(), glib::Error> {
+        self.set_state_blocking(gst::State::Null)
+    }
+
+    pub fn set_state_blocking(&self, new_state: gst::State) -> Result<(), glib::Error> {
+        let timeout = 10 * gst::ClockTime::SECOND;
+
+        let state_change_error = match self.raw().set_state(new_state) {
+            Ok(StateChangeSuccess::Success | StateChangeSuccess::NoPreroll) => return Ok(()),
+            Ok(StateChangeSuccess::Async) => {
+                let (result, _curr, _pending) = self.raw().state(timeout);
+                match result {
+                    Ok(StateChangeSuccess::Success | StateChangeSuccess::NoPreroll) => {
+                        return Ok(())
+                    }
+
+                    //state change failed within timeout. Treat as error
+                    Ok(StateChangeSuccess::Async) => None,
+                    Err(e) => Some(e),
+                }
+            }
+
+            Err(e) => Some(e),
+        };
+
+        // If there was any error then return that.
+        // If no error but timed out then say so.
+        // If no error and no timeout then any report will do.
+        let error: glib::Error =
+            match get_bus_errors(&self.raw().bus().expect("failed to get gst bus")).next() {
+                Some(e) => e,
+                _ => {
+                    if let Some(_e) = state_change_error {
+                        glib::Error::new(gst::CoreError::TooLazy, "Gstreamer State Change Error")
+                    } else {
+                        glib::Error::new(gst::CoreError::TooLazy, "Internal Gstreamer error")
+                    }
+                }
+            };
+
+        if new_state == gst::State::Null {
+            return Err(error);
+        }
+
+        // Before returning, close down the pipeline to prevent memory leaks.
+        // But if the pipeline can't close, cause a panic (preferable to memory leak)
+        match self.set_state_blocking(gst::State::Null) {
+            Ok(()) => Err(error),
+            Err(e) => panic!("{e:?}"),
+        }
+    }
+
+    /// Seek to the given position in the file, passing the 'accurate' flag to gstreamer.
+    /// If you want to make large jumps in a video file this may be faster than setting a
+    /// very low framerate (because with a low framerate, gstreamer still decodes every frame).
+    pub fn seek_accurate(&self, time: f64) -> Result<(), glib::Error> {
+        let time_ns_f64 = time * ClockTime::SECOND.nseconds() as f64;
+        let time_ns_u64 = time_ns_f64 as u64;
+        let flags = SeekFlags::ACCURATE.union(SeekFlags::FLUSH);
+
+        self.raw()
+            .seek_simple(flags, gst::ClockTime::from_nseconds(time_ns_u64))
+            .map_err(|e| glib::Error::new(CoreError::TooLazy, &e.message))
+    }
+}
+
+impl From<gst::Pipeline> for Pipeline {
+    fn from(value: gst::Pipeline) -> Self {
+        Self(value)
+    }
+}
+
+/// Drain all messages from the bus, keeping track of eos and error.
+/// (This prevents messages piling up and causing memory leaks)
+fn get_bus_errors(bus: &gst::Bus) -> impl Iterator<Item = glib::Error> + '_ {
+    let errs_warns = [gst::MessageType::Error, gst::MessageType::Warning];
+
+    std::iter::from_fn(move || bus.pop_filtered(&errs_warns).map(into_glib_error))
+}
+
+pub(super) fn into_glib_error(msg: gst::Message) -> glib::Error {
+    match msg.view() {
+        MessageView::Error(e) => e.error(),
+        MessageView::Warning(w) => w.error(),
+        _ => {
+            panic!("Only Warning and Error messages can be converted into GstreamerError")
+        }
+    }
+}

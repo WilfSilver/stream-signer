@@ -131,6 +131,7 @@ mod verifying {
             let appsink = self
                 .init
                 .pipe
+                .raw()
                 .by_name(&self.init.video_sink)
                 .expect("Sink element not found")
                 .downcast::<gst_app::AppSink>()

@@ -8,7 +8,8 @@ use std::{iter::FusedIterator, sync::Arc};
 use gst::{CoreError, MessageView};
 
 use super::{
-    manager::{into_glib_error, PipeInitiator, PipeState},
+    gst::into_glib_error,
+    manager::{PipeInitiator, PipeState},
     Frame,
 };
 
