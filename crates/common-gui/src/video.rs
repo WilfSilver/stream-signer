@@ -1,14 +1,62 @@
-use std::marker::PhantomData;
+use std::{
+    marker::PhantomData,
+    pin::Pin,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    task::Poll,
+};
 
 use druid::{
     Data, Event, Lens, LensExt, LifeCycle, LifeCycleCtx, Rect, RenderContext, Size, Widget,
     widget::{LensWrap, WidgetWrapper},
 };
+use stream_signer::time::Timestamp;
+use tokio::sync::Mutex;
 
 use crate::state::VideoState;
 
+#[derive(Debug, Default, Clone)]
+pub struct Playing {
+    paused: Arc<AtomicBool>,
+}
+
+impl Future for Playing {
+    type Output = ();
+    fn poll(self: Pin<&mut Self>, _cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        if self.paused.load(Ordering::Relaxed) {
+            Poll::Pending
+        } else {
+            Poll::Ready(())
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct PlayerState {
+    pub playing: Playing,
+    pub duration: Option<Timestamp>,
+    pub pos: Timestamp,
+}
+
+impl PlayerState {
+    pub fn set_duration(&mut self, duration: Timestamp) {
+        self.duration = Some(duration);
+    }
+
+    pub fn set_pos(&mut self, pos: Timestamp) {
+        self.pos = pos;
+    }
+}
+
 pub trait VideoPlayer<T>: Widget<T> {
-    fn spawn_player(&self, event_sink: druid::ExtEventSink, initial_state: T);
+    fn spawn_player(
+        &self,
+        event_sink: druid::ExtEventSink,
+        state: Arc<Mutex<PlayerState>>,
+        initial_state: T,
+    );
 }
 
 impl<T, L, W> VideoPlayer<VideoState<T>> for LensWrap<VideoState<T>, T, L, W>
@@ -17,13 +65,19 @@ where
     W: VideoPlayer<T>,
     L: Lens<VideoState<T>, T>,
 {
-    fn spawn_player(&self, event_sink: druid::ExtEventSink, initial_state: VideoState<T>) {
+    fn spawn_player(
+        &self,
+        event_sink: druid::ExtEventSink,
+        state: Arc<Mutex<PlayerState>>,
+        initial_state: VideoState<T>,
+    ) {
         self.wrapped()
-            .spawn_player(event_sink, self.lens().get(&initial_state));
+            .spawn_player(event_sink, state, self.lens().get(&initial_state));
     }
 }
 
 pub struct VideoWidget<C: VideoPlayer<T>, T: Clone + Data> {
+    player_state: Arc<Mutex<PlayerState>>,
     inner: C,
     _phantom: PhantomData<T>,
 }
@@ -31,6 +85,7 @@ pub struct VideoWidget<C: VideoPlayer<T>, T: Clone + Data> {
 impl<C: VideoPlayer<T>, T: Clone + Data> VideoWidget<C, T> {
     pub fn new(inner: C) -> Self {
         VideoWidget {
+            player_state: Arc::new(Mutex::new(PlayerState::default())),
             inner,
             _phantom: PhantomData,
         }
@@ -93,7 +148,8 @@ impl<C: VideoPlayer<VideoState<T>>, T: Clone + Data> Widget<VideoState<T>>
             ctx.request_anim_frame();
 
             let event_sink = ctx.get_external_handle();
-            self.inner.spawn_player(event_sink, data.clone());
+            self.inner
+                .spawn_player(event_sink, self.player_state.clone(), data.clone());
         }
         self.inner.lifecycle(ctx, event, data, env);
     }

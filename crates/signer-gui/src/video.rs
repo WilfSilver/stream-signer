@@ -8,9 +8,12 @@ use std::{
 
 use std::io::prelude::*;
 
-use common_gui::{state::VideoState, video::VideoPlayer};
+use common_gui::{
+    state::VideoState,
+    video::{PlayerState, VideoPlayer},
+};
 use druid::{Code, Color, Data, Event, Lens, LifeCycle, LifeCycleCtx, RenderContext, Widget};
-use futures::TryStreamExt;
+use futures::{FutureExt, TryStreamExt};
 use identity_iota::{
     core::{FromJson, ToJson},
     credential::Subject,
@@ -24,6 +27,7 @@ use stream_signer::{
     SignFile, SignPipeline,
 };
 use testlibs::{client::get_client, identity::TestIdentity, issuer::TestIssuer};
+use tokio::sync::Mutex;
 
 use crate::state::{AppData, View};
 
@@ -48,6 +52,7 @@ impl SignPlayer {
 
     async fn watch_video(
         event_sink: druid::ExtEventSink,
+        state: Arc<Mutex<PlayerState>>,
         sign_last_chunk: Arc<(AtomicBool, AtomicU32)>,
         options: VideoOptions,
     ) {
@@ -94,32 +99,53 @@ impl SignPlayer {
         // timestamp)
         let mut last_sign: Timestamp = 0.into();
         let signfile = pipe
-            .sign(|info| {
-                let time = info.time;
+            .sign_async(|info| {
+                let signer = signer.clone();
+                let event_sink = event_sink.clone();
+                let sign_last_chunk = sign_last_chunk.clone();
+                let state = state.clone();
 
-                event_sink.add_idle_callback(move |data: &mut AppData| {
-                    data.video.update_frame(info);
-                });
+                async move {
+                    let time = info.time;
+                    let duration = info.video.duration;
 
-                // We want to sign when requested, or if the next frame is going to be past the
-                // maximum chunk signing length
-                let next_frame_time = *(time.start() - last_sign) as f64 + time.frame_duration();
-                if sign_last_chunk.0.load(Ordering::Relaxed)
-                    || next_frame_time >= MAX_CHUNK_LENGTH as f64
-                {
-                    let res = vec![ChunkSigner::new(
-                        last_sign,
-                        signer.clone(),
-                        last_sign != 0.into(),
-                    )];
+                    // Wait until playing
+                    // We don't want to have the state locked while awaiting
+                    // the pause to stop
+                    state
+                        .lock()
+                        .then(|mut s| {
+                            s.set_pos(time.start());
+                            s.set_duration(duration);
+                            s.playing.clone()
+                        })
+                        .await;
 
-                    sign_last_chunk.0.store(false, Ordering::Relaxed);
-                    last_sign = time.start();
-                    sign_last_chunk.1.store(last_sign.into(), Ordering::Relaxed);
+                    event_sink.add_idle_callback(move |data: &mut AppData| {
+                        data.video.update_frame(info);
+                    });
 
-                    res
-                } else {
-                    vec![]
+                    // We want to sign when requested, or if the next frame is going to be past the
+                    // maximum chunk signing length
+                    let next_frame_time =
+                        *(time.start() - last_sign) as f64 + time.frame_duration();
+                    if sign_last_chunk.0.load(Ordering::Relaxed)
+                        || next_frame_time >= MAX_CHUNK_LENGTH as f64
+                    {
+                        let res = vec![ChunkSigner::new(
+                            last_sign,
+                            signer.clone(),
+                            last_sign != 0.into(),
+                        )];
+
+                        sign_last_chunk.0.store(false, Ordering::Relaxed);
+                        last_sign = time.start();
+                        sign_last_chunk.1.store(last_sign.into(), Ordering::Relaxed);
+
+                        res
+                    } else {
+                        vec![]
+                    }
                 }
             })
             .expect("Failed to initiate video")
@@ -140,9 +166,19 @@ impl SignPlayer {
 type State = VideoState<VideoOptions>;
 
 impl VideoPlayer<State> for SignPlayer {
-    fn spawn_player(&self, event_sink: druid::ExtEventSink, state: State) {
+    fn spawn_player(
+        &self,
+        event_sink: druid::ExtEventSink,
+        state: Arc<Mutex<PlayerState>>,
+        initial: State,
+    ) {
         let sign_info = self.sign_info.clone();
-        tokio::spawn(Self::watch_video(event_sink, sign_info, state.options));
+        tokio::spawn(Self::watch_video(
+            event_sink,
+            state,
+            sign_info,
+            initial.options,
+        ));
     }
 }
 

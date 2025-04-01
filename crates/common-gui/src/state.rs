@@ -1,12 +1,46 @@
 use druid::{Data, Lens, PaintCtx, RenderContext, piet::CairoImage};
-use stream_signer::video::FrameInfo;
+use stream_signer::{
+    utils::TimeRange,
+    video::{Frame, FrameState},
+};
+
+/// This is here to act as a simple caching layer, making it quicker to
+/// when running [Data::same]
+#[derive(Clone, Debug)]
+pub struct FrameWithIdx {
+    pub frame: Frame,
+    pub time: TimeRange,
+    pub idx: usize,
+}
+
+impl From<&FrameState> for FrameWithIdx {
+    fn from(value: &FrameState) -> Self {
+        let idx = value.frame_idx();
+        Self {
+            frame: value.frame.clone(),
+            time: value.time,
+            idx,
+        }
+    }
+}
+
+impl From<FrameState> for FrameWithIdx {
+    fn from(value: FrameState) -> Self {
+        let idx = value.frame_idx();
+        Self {
+            frame: value.frame,
+            time: value.time,
+            idx,
+        }
+    }
+}
 
 #[derive(Clone, Lens)]
 pub struct VideoState<T>
 where
     T: Clone + Data,
 {
-    pub curr_frame: Option<FrameInfo>,
+    pub curr_frame: Option<FrameWithIdx>,
     pub options: T,
 }
 
@@ -23,8 +57,8 @@ impl<T: Clone + Data> VideoState<T> {
         })
     }
 
-    pub fn update_frame(&mut self, frame: FrameInfo) {
-        self.curr_frame = Some(frame);
+    pub fn update_frame(&mut self, frame: FrameState) {
+        self.curr_frame = Some(frame.into());
     }
 }
 
@@ -32,7 +66,7 @@ impl<T: Clone + Data> Data for VideoState<T> {
     fn same(&self, other: &Self) -> bool {
         self.options.same(&other.options)
             && match (&self.curr_frame, &other.curr_frame) {
-                (Some(sf), Some(of)) => sf.idx() == of.idx(),
+                (Some(sf), Some(of)) => sf.idx == of.idx,
                 (None, None) => true,
                 _ => false,
             }

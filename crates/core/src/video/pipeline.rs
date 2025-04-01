@@ -108,11 +108,11 @@ mod verifying {
                     };
 
                     let fps = manager.fps();
-                    let info = manager.get_frame_info();
+                    let info = manager.get_frame_state().await;
 
                     let sigs = manager.verify_signatures().await;
 
-                    let res = Box::pin(VerifiedFrame { info, sigs });
+                    let res = Box::pin(VerifiedFrame { state: info, sigs });
 
                     if synced {
                         fps.sleep_for_rest(now.elapsed()).await;
@@ -145,13 +145,18 @@ mod verifying {
 
 #[cfg(feature = "signing")]
 mod signing {
-    use futures::{stream, Stream, StreamExt};
-    use std::{collections::VecDeque, pin::Pin, sync::Arc};
+    use futures::{stream, FutureExt, Stream, StreamExt};
+    use std::{
+        collections::VecDeque,
+        future::{self, Future},
+        pin::Pin,
+        sync::Arc,
+    };
     use tokio::sync::Mutex;
 
     use crate::{
         file::SignedInterval,
-        video::{sign::Controller, Frame, FrameInfo, SigningError},
+        video::{sign::Controller, Frame, FrameState, SigningError},
     };
 
     use self::sign::SigningContext;
@@ -221,9 +226,12 @@ mod signing {
         where
             C: Controller<S> + 'static,
         {
-            self.sign(move |info| match controller.get_chunk(&info) {
-                Some(res) => vec![res],
-                None => vec![],
+            // let controller = Arc::new(Mutex::new(controller));
+            self.sign_async(move |info| {
+                controller.get_chunk(&info).map(|r| match r {
+                    Some(res) => vec![res],
+                    None => vec![],
+                })
             })
         }
 
@@ -300,15 +308,22 @@ mod signing {
         /// ```
         pub fn sign_with_all<C, S: Signer + 'static>(
             self,
-            mut controllers: Vec<Box<dyn Controller<S>>>,
+            controllers: Vec<Box<dyn Controller<S>>>,
         ) -> Result<impl Stream<Item = Result<SignedInterval, SigningError>>, StreamError> {
-            self.sign(move |info| {
-                controllers
-                    .iter_mut()
-                    .map(move |c| c.get_chunk(&info))
-                    .filter(Option::is_some)
-                    .flatten()
-                    .collect::<Vec<_>>()
+            let controllers = Arc::new(Mutex::new(controllers));
+            self.sign_async(move |info| {
+                let controllers = controllers.clone();
+
+                async move {
+                    let mut controllers = controllers.lock().await;
+                    stream::iter(controllers.iter_mut())
+                        .then(move |c| c.get_chunk(&info))
+                        .filter(|x| future::ready(Option::is_some(x)))
+                        .map(Option::unwrap)
+                        .collect::<Vec<_>>()
+                        .await
+                    // .collect::<Vec<_>>()
+                }
             })
         }
 
@@ -390,7 +405,28 @@ mod signing {
         ) -> Result<impl Stream<Item = Result<SignedInterval, SigningError>>, StreamError>
         where
             S: Signer + 'static,
-            F: FnMut(FrameInfo) -> ITER,
+            F: FnMut(FrameState) -> ITER,
+            ITER: IntoIterator<Item = ChunkSigner<S>>,
+            <ITER as IntoIterator>::IntoIter: Send,
+        {
+            let sign_with = Arc::new(Mutex::new(sign_with));
+            self.sign_async(move |frame| {
+                let sign_with = sign_with.clone();
+                async move {
+                    let mut sign_with = sign_with.lock().await;
+                    sign_with(frame)
+                }
+            })
+        }
+
+        pub fn sign_async<S, F, ITER, FUT>(
+            self,
+            sign_with: F,
+        ) -> Result<impl Stream<Item = Result<SignedInterval, SigningError>>, StreamError>
+        where
+            S: Signer + 'static,
+            F: FnMut(FrameState) -> FUT,
+            FUT: Future<Output = ITER>,
             ITER: IntoIterator<Item = ChunkSigner<S>>,
             <ITER as IntoIterator>::IntoIter: Send,
         {

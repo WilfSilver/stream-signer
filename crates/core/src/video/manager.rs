@@ -18,7 +18,8 @@ use tokio::sync::Mutex;
 use crate::{file::Timestamp, spec::Coord};
 
 use super::{
-    Frame, FrameInfo, Framerate, SigOperationError, StreamError, MAX_CHUNK_LENGTH, MIN_CHUNK_LENGTH,
+    Frame, FrameState, Framerate, SigOperationError, StreamError, MAX_CHUNK_LENGTH,
+    MIN_CHUNK_LENGTH,
 };
 
 /// This trait is designed to make it easier to extract the exact bytes which
@@ -62,7 +63,7 @@ pub trait FrameBuffer {
 #[derive(Debug, Clone)]
 pub struct PipeManager<VC, FC> {
     /// The information stored about the frame itself
-    pub frame: Arc<FrameState<FC>>,
+    pub frame: Arc<FrameManager<FC>>,
     /// The information about the pipes state and other information which was
     /// needed when building the pipeline
     pub state: Arc<PipeState<VC>>,
@@ -80,7 +81,7 @@ impl<VC, FC> PipeManager<VC, FC> {
         let offset = state.offset;
 
         Ok(Self {
-            frame: Arc::new(FrameState::new(
+            frame: Arc::new(FrameManager::new(
                 frame_info.0,
                 frame_info.1,
                 frame_info.2,
@@ -102,8 +103,14 @@ impl<VC, FC> PipeManager<VC, FC> {
         time.into_frames(self.fps(), self.state.offset)
     }
 
-    pub fn get_frame_info(&self) -> FrameInfo {
-        FrameInfo::new(
+    pub async fn get_frame_state(&self) -> FrameState {
+        FrameState::new(
+            self.state
+                .src
+                .lock()
+                .await
+                .clone()
+                .expect("Source information was not set"),
             self.frame.raw.clone(),
             self.frame.idx,
             self.fps(),
@@ -112,8 +119,14 @@ impl<VC, FC> PipeManager<VC, FC> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SrcInfo {
+    pub duration: Timestamp,
+}
+
 #[derive(Debug)]
 pub struct PipeInitiator {
+    pub src: Arc<Mutex<Option<SrcInfo>>>,
     pub pipe: Pipeline,
     pub offset: f64,
     pub video_sink: String,
@@ -121,6 +134,10 @@ pub struct PipeInitiator {
 
 #[derive(Debug)]
 pub struct PipeState<VC> {
+    /// Stores cached information at the source, and is filled once the source
+    /// is loarded
+    pub src: Arc<Mutex<Option<SrcInfo>>>,
+
     /// The raw gstreamer pipelien
     pub pipe: Pipeline,
     /// The start offset time for the video
@@ -142,6 +159,7 @@ impl<VC> PipeState<VC> {
     /// Creates a new pipeline state
     pub fn new(init: PipeInitiator, context: VC) -> Result<Self, glib::Error> {
         let state = Self {
+            src: init.src,
             video_sink: init.video_sink,
             pipe: init.pipe,
             offset: init.offset, // TODO: Test if this is necessary
@@ -207,7 +225,7 @@ impl<VC> PipeState<VC> {
 
 /// This stores specific information about the state of the current frame
 #[derive(Debug)]
-pub struct FrameState<FC> {
+pub struct FrameManager<FC> {
     /// The relative index to the start of the video itself
     pub idx: usize,
     /// The number of frames which could be shown within the next millisecond
@@ -222,7 +240,7 @@ pub struct FrameState<FC> {
     pub context: FC,
 }
 
-impl<FC> FrameState<FC> {
+impl<FC> FrameManager<FC> {
     pub fn new(
         idx: usize,
         frame: Result<Frame, StreamError>,
@@ -260,17 +278,18 @@ pub mod sign {
 
     use crate::{
         file::SignedInterval,
-        video::{ChunkSigner, FrameInfo, Signer, SigningError},
+        video::{ChunkSigner, FrameState, Signer, SigningError},
     };
 
     use super::*;
 
     /// This stores the extra information that we need when signing frames, as
     /// it doesn't change it is stored in the [PipeState]
-    pub struct SigningContext<S, F, ITER>
+    pub struct SigningContext<S, F, ITER, FUT>
     where
         S: Signer + 'static,
-        F: FnMut(FrameInfo) -> ITER,
+        F: FnMut(FrameState) -> FUT,
+        FUT: Future<Output = ITER>,
         ITER: IntoIterator<Item = ChunkSigner<S>>,
     {
         /// The function that is given by the user to get the [ChunkSigner]s
@@ -292,13 +311,13 @@ pub mod sign {
 
     /// This is the specific implementation of the [PipeManager] used by the
     /// signing process
-    pub type Manager<S, F, ITER> = PipeManager<SigningContext<S, F, ITER>, MyFrameBuffer>;
-    type MyPipeState<S, F, ITER> = Arc<PipeState<SigningContext<S, F, ITER>>>;
+    pub type Manager<S, F, ITER, FUT> = PipeManager<SigningContext<S, F, ITER, FUT>, MyFrameBuffer>;
+    type MyPipeState<S, F, ITER, FUT> = Arc<PipeState<SigningContext<S, F, ITER, FUT>>>;
 
-    type StatesPair<S, F, ITER> = (MyPipeState<S, F, ITER>, Result<Frame, glib::Error>);
-    type EnumeratedStatesPair<S, F, ITER> = (usize, StatesPair<S, F, ITER>);
-    type SigningItem<S, F, ITER> = (
-        EnumeratedStatesPair<S, F, ITER>,
+    type StatesPair<S, F, ITER, FUT> = (MyPipeState<S, F, ITER, FUT>, Result<Frame, glib::Error>);
+    type EnumeratedStatesPair<S, F, ITER, FUT> = (usize, StatesPair<S, F, ITER, FUT>);
+    type SigningItem<S, F, ITER, FUT> = (
+        EnumeratedStatesPair<S, F, ITER, FUT>,
         Arc<Mutex<VecDeque<Frame>>>,
     );
 
@@ -306,12 +325,13 @@ pub mod sign {
     /// mostly to make it easier to integrate into existing solutions e.g.
     ///
     /// TODO: Write an example pls
-    pub async fn manage<S, F, ITER>(
-        ((i, (state, frame)), buffer): SigningItem<S, F, ITER>,
-    ) -> Result<Manager<S, F, ITER>, SigningError>
+    pub async fn manage<S, F, ITER, FUT>(
+        ((i, (state, frame)), buffer): SigningItem<S, F, ITER, FUT>,
+    ) -> Result<Manager<S, F, ITER, FUT>, SigningError>
     where
         S: Signer + 'static,
-        F: FnMut(FrameInfo) -> ITER,
+        F: FnMut(FrameState) -> FUT,
+        FUT: Future<Output = ITER>,
         ITER: IntoIterator<Item = ChunkSigner<S>>,
     {
         let mut buffer = buffer.lock().await;
@@ -340,7 +360,7 @@ pub mod sign {
         )?)
     }
 
-    impl FrameState<MyFrameBuffer> {
+    impl FrameManager<MyFrameBuffer> {
         /// This calculates the starting index for the frame at a given
         /// timestamp relative to the [MyFrameBuffer]
         fn get_chunk_start(
@@ -394,17 +414,18 @@ pub mod sign {
         }
     }
 
-    impl<S, F, ITER> Manager<S, F, ITER>
+    impl<S, F, ITER, FUT> Manager<S, F, ITER, FUT>
     where
         S: Signer + 'static,
-        F: FnMut(FrameInfo) -> ITER,
+        F: FnMut(FrameState) -> FUT,
+        FUT: Future<Output = ITER>,
         ITER: IntoIterator<Item = ChunkSigner<S>>,
     {
         /// This calls the `sign_with` function stored in [SigningContext] and returns the result
         /// as an iterator
         pub async fn request_sign_info(&self) -> impl Iterator<Item = ChunkSigner<S>> {
             let mut sign_with = self.state.context.sign_with.lock().await;
-            let sign_info = sign_with(self.get_frame_info());
+            let sign_info = sign_with(self.get_frame_state().await).await;
 
             sign_info.into_iter()
         }
@@ -561,7 +582,7 @@ pub mod verification {
         }
     }
 
-    impl FrameBuffer for FrameState<FutureFramesContext> {
+    impl FrameBuffer for FrameManager<FutureFramesContext> {
         fn with_frames<'a>(
             &'a self,
             range: Range<usize>,

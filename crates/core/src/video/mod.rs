@@ -6,11 +6,13 @@ pub mod manager;
 mod pipeline;
 #[cfg(feature = "signing")]
 pub mod sign;
+mod state;
 #[cfg(feature = "verifying")]
 pub mod verify;
 
 pub use error::*;
-pub use frame::{Frame, FrameInfo, Framerate};
+pub use frame::{Frame, Framerate};
 pub use pipeline::*;
 #[cfg(feature = "signing")]
 pub use sign::{ChunkSigner, Signer};
+pub use state::FrameState;
