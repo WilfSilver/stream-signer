@@ -217,7 +217,7 @@ impl SignPipelineBuilder<'_> {
 
         Ok(PipeInitiator {
             src: src_info,
-            pipe,
+            pipe: pipe.into(),
             video_sink,
             offset: self.start_offset.unwrap_or_default(),
         })

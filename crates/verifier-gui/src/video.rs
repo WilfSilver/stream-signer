@@ -203,11 +203,13 @@ impl VerifyPlayer {
             // the pause to stop
             state
                 .lock()
-                .then(|mut s| {
+                .map(|mut s| {
                     s.set_pos(time.start());
                     s.set_duration(duration);
                     s.playing.clone()
                 })
+                .await
+                .wait_if_paused(&info.state.pipe)
                 .await;
 
             event_sink.add_idle_callback(move |data: &mut AppData| {

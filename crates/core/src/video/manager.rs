@@ -8,17 +8,14 @@
 use std::{ops::Range, sync::Arc};
 
 use glib::object::Cast;
-use gst::{
-    prelude::{ElementExt, ElementExtManual, GstBinExt},
-    ClockTime, CoreError, MessageView, Pipeline, SeekFlags, StateChangeSuccess,
-};
+use gst::prelude::{ElementExt, GstBinExt};
 use gst_app::AppSink;
 use tokio::sync::Mutex;
 
 use crate::{file::Timestamp, spec::Coord};
 
 use super::{
-    Frame, FrameState, Framerate, SigOperationError, StreamError, MAX_CHUNK_LENGTH,
+    Frame, FrameState, Framerate, Pipeline, SigOperationError, StreamError, MAX_CHUNK_LENGTH,
     MIN_CHUNK_LENGTH,
 };
 
@@ -111,6 +108,7 @@ impl<VC, FC> PipeManager<VC, FC> {
                 .await
                 .clone()
                 .expect("Source information was not set"),
+            self.state.pipe.clone(),
             self.frame.raw.clone(),
             self.frame.idx,
             self.fps(),
@@ -177,38 +175,33 @@ impl<VC> PipeState<VC> {
 
     /// Sets the pipeline to the [gst::State::Paused] state
     pub fn pause(&self) -> Result<(), glib::Error> {
-        change_state_blocking(&self.pipe, gst::State::Paused)
+        self.pipe.pause()
     }
 
     /// Sets the pipeline to the [gst::State::Playing] state
     pub fn play(&self) -> Result<(), glib::Error> {
-        change_state_blocking(&self.pipe, gst::State::Playing)
+        self.pipe.play()
     }
 
     /// Sets the pipeline to the [gst::State::Null] state
     ///
     /// This is required to stop any memory leaks when the pipeline ends
     pub(super) fn close(&self) -> Result<(), glib::Error> {
-        change_state_blocking(&self.pipe, gst::State::Null)
+        self.pipe.close()
     }
 
     /// Seek to the given position in the file, passing the 'accurate' flag to gstreamer.
     /// If you want to make large jumps in a video file this may be faster than setting a
     /// very low framerate (because with a low framerate, gstreamer still decodes every frame).
     pub fn seek_accurate(&self, time: f64) -> Result<(), glib::Error> {
-        let time_ns_f64 = time * ClockTime::SECOND.nseconds() as f64;
-        let time_ns_u64 = time_ns_f64 as u64;
-        let flags = SeekFlags::ACCURATE.union(SeekFlags::FLUSH);
-
-        self.pipe
-            .seek_simple(flags, gst::ClockTime::from_nseconds(time_ns_u64))
-            .map_err(|e| glib::Error::new(CoreError::TooLazy, &e.message))
+        self.pipe.seek_accurate(time)
     }
 
     /// Returns an [AppSink] from the stored information about the sink.
     /// This is assumed to never fail, relying on the setup to be correct
     pub fn get_sink(&self) -> AppSink {
         self.pipe
+            .raw()
             .by_name(&self.video_sink)
             .expect("Sink element not found")
             .downcast::<gst_app::AppSink>()
@@ -218,6 +211,7 @@ impl<VC> PipeState<VC> {
     /// Returns a [gst::Bus] for the current pipeline
     pub fn bus(&self) -> gst::Bus {
         self.pipe
+            .raw()
             .bus()
             .expect("Failed to get pipeline from bus. Shouldn't happen!")
     }
@@ -592,69 +586,6 @@ pub mod verification {
                     .into_iter()
                     .chain(self.context[range].iter().filter_map(|a| a.1.as_ref().ok())),
             )
-        }
-    }
-}
-
-pub(super) fn change_state_blocking(
-    pipeline: &gst::Pipeline,
-    new_state: gst::State,
-) -> Result<(), glib::Error> {
-    let timeout = 10 * gst::ClockTime::SECOND;
-
-    let state_change_error = match pipeline.set_state(new_state) {
-        Ok(StateChangeSuccess::Success | StateChangeSuccess::NoPreroll) => return Ok(()),
-        Ok(StateChangeSuccess::Async) => {
-            let (result, _curr, _pending) = pipeline.state(timeout);
-            match result {
-                Ok(StateChangeSuccess::Success | StateChangeSuccess::NoPreroll) => return Ok(()),
-
-                //state change failed within timeout. Treat as error
-                Ok(StateChangeSuccess::Async) => None,
-                Err(e) => Some(e),
-            }
-        }
-
-        Err(e) => Some(e),
-    };
-
-    // If there was any error then return that.
-    // If no error but timed out then say so.
-    // If no error and no timeout then any report will do.
-    let error: glib::Error =
-        match get_bus_errors(&pipeline.bus().expect("failed to get gst bus")).next() {
-            Some(e) => e,
-            _ => {
-                if let Some(_e) = state_change_error {
-                    glib::Error::new(gst::CoreError::TooLazy, "Gstreamer State Change Error")
-                } else {
-                    glib::Error::new(gst::CoreError::TooLazy, "Internal Gstreamer error")
-                }
-            }
-        };
-
-    // Before returning, close down the pipeline to prevent memory leaks.
-    // But if the pipeline can't close, cause a panic (preferable to memory leak)
-    match change_state_blocking(pipeline, gst::State::Null) {
-        Ok(()) => Err(error),
-        Err(e) => panic!("{e:?}"),
-    }
-}
-
-/// Drain all messages from the bus, keeping track of eos and error.
-/// (This prevents messages piling up and causing memory leaks)
-fn get_bus_errors(bus: &gst::Bus) -> impl Iterator<Item = glib::Error> + '_ {
-    let errs_warns = [gst::MessageType::Error, gst::MessageType::Warning];
-
-    std::iter::from_fn(move || bus.pop_filtered(&errs_warns).map(into_glib_error))
-}
-
-pub(super) fn into_glib_error(msg: gst::Message) -> glib::Error {
-    match msg.view() {
-        MessageView::Error(e) => e.error(),
-        MessageView::Warning(w) => w.error(),
-        _ => {
-            panic!("Only Warning and Error messages can be converted into GstreamerError")
         }
     }
 }

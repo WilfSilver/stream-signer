@@ -114,11 +114,13 @@ impl SignPlayer {
                     // the pause to stop
                     state
                         .lock()
-                        .then(|mut s| {
+                        .map(|mut s| {
                             s.set_pos(time.start());
                             s.set_duration(duration);
                             s.playing.clone()
                         })
+                        .await
+                        .wait_if_paused(&info.pipe)
                         .await;
 
                     event_sink.add_idle_callback(move |data: &mut AppData| {
@@ -190,11 +192,12 @@ impl Widget<State> for SignPlayer {
         _data: &mut State,
         _env: &druid::Env,
     ) {
-        if let Event::KeyDown(id) = event {
-            if id.code == Code::Space {
+        match event {
+            Event::KeyDown(id) if id.code == Code::Enter => {
                 self.sign_info.0.store(true, Ordering::Relaxed);
                 ctx.set_handled();
             }
+            _ => {}
         }
     }
 
