@@ -1,12 +1,12 @@
 use std::{fs::File, ops::Deref, sync::Arc};
 
-use common_gui::video::VideoPlayer;
+use common_gui::video::{PlayerState, VideoPlayer};
 use druid::{
     piet::RenderContext,
     widget::{Label, List, Painter, Scroll},
     BoxConstraints, Color, Data, Event, Lens, LifeCycle, LifeCycleCtx, PaintCtx, Widget, WidgetExt,
 };
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use im::Vector;
 use serde_json::json;
@@ -73,8 +73,13 @@ pub struct VerifyPlayer {
 }
 
 impl VideoPlayer<VideoOptions> for VerifyPlayer {
-    fn spawn_player(&self, event_sink: druid::ExtEventSink, options: VideoOptions) {
-        tokio::spawn(Self::watch_video(event_sink, options));
+    fn spawn_player(
+        &self,
+        event_sink: druid::ExtEventSink,
+        state: Arc<Mutex<PlayerState>>,
+        options: VideoOptions,
+    ) {
+        tokio::spawn(Self::watch_video(event_sink, state, options));
     }
 }
 
@@ -138,7 +143,11 @@ impl VerifyPlayer {
         VerifyPlayer { sig_list }
     }
 
-    async fn watch_video(event_sink: druid::ExtEventSink, options: VideoOptions) {
+    async fn watch_video(
+        event_sink: druid::ExtEventSink,
+        state: Arc<Mutex<PlayerState>>,
+        options: VideoOptions,
+    ) {
         gst::init().expect("Failed gstreamer");
 
         let client = {
@@ -186,8 +195,23 @@ impl VerifyPlayer {
                 return;
             };
 
+            let time = info.state.time;
+            let duration = info.state.video.duration;
+
+            // Wait until playing
+            // We don't want to have the state locked while awaiting
+            // the pause to stop
+            state
+                .lock()
+                .then(|mut s| {
+                    s.set_pos(time.start());
+                    s.set_duration(duration);
+                    s.playing.clone()
+                })
+                .await;
+
             event_sink.add_idle_callback(move |data: &mut AppData| {
-                data.video.curr_frame = Some(info.info.clone());
+                data.video.curr_frame = Some((&info.state).into());
                 data.video.options.sigs =
                     Vector::from_iter(info.sigs.iter().cloned().map(SigState));
             });

@@ -1,13 +1,17 @@
 //! Parts of this file is inspired by [vid_frame_iter](https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter)
 
-use std::path::Path;
+use std::{path::Path, sync::Arc};
 
+use futures::executor;
 use glib::object::ObjectExt;
 use gst::{
     element_factory::ElementBuilder,
     prelude::{ElementExt, ElementExtManual, GstBinExtManual, PadExt},
     Element, ElementFactory,
 };
+use tokio::sync::Mutex;
+
+use crate::{file::Timestamp, video::manager::SrcInfo};
 
 use super::{manager::PipeInitiator, SignPipeline};
 
@@ -186,6 +190,8 @@ impl SignPipelineBuilder<'_> {
         // We dynamically link the source later on
         Element::link_many(chain.skip(1))?;
 
+        let src_info = Arc::new(Mutex::new(None));
+        let si = src_info.clone();
         // Connect the 'pad-added' signal to dynamically link the source to the converter
         let sn = video_sink.clone();
         src.connect_pad_added(move |src, pad| {
@@ -202,13 +208,15 @@ impl SignPipelineBuilder<'_> {
                 println!("Pads are already linked")
             }
 
-            println!(
-                "Duration: {}",
-                src.query_duration::<gst::format::Time>().unwrap()
-            );
+            let duration: Timestamp = src.query_duration::<gst::format::Time>().unwrap().into();
+            executor::block_on(async {
+                let mut info = si.lock().await;
+                *info = Some(SrcInfo { duration });
+            });
         });
 
         Ok(PipeInitiator {
+            src: src_info,
             pipe,
             video_sink,
             offset: self.start_offset.unwrap_or_default(),

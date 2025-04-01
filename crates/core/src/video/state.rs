@@ -3,15 +3,20 @@
 
 use crate::utils::TimeRange;
 
-use super::{Frame, Framerate};
+use crate::video::manager::SrcInfo;
+use crate::video::{Frame, Framerate};
 
-/// An interface to make it easier interacting with the [Frame]
+/// An interface to make it easier interacting with the [Frame] and other
+/// aspects of the video (without having the bloated contexts)
 ///
 /// Note this is slightly different to [crate::video::manager::FrameState], as
 /// that is more focused on being a nice interface to interact with (and also
 /// we don't need the specific context for this frame)
 #[derive(Debug, Clone)]
-pub struct FrameInfo {
+pub struct FrameState {
+    /// Stores information about the video itself
+    pub video: SrcInfo,
+
     /// Stores the frame itself, it is okay to clone the frame due to the fact
     /// [Frame::clone] does not clone the underlying object
     pub frame: Frame,
@@ -21,12 +26,19 @@ pub struct FrameInfo {
     frame_idx: usize,
 }
 
-impl FrameInfo {
-    pub(crate) fn new(frame: Frame, frame_idx: usize, fps: Framerate<usize>, offset: f64) -> Self {
+impl FrameState {
+    pub(crate) fn new(
+        video: SrcInfo,
+        frame: Frame,
+        frame_idx: usize,
+        fps: Framerate<usize>,
+        offset: f64,
+    ) -> Self {
         let fps: Framerate<f64> = fps.into();
         let exact_time = offset + fps.convert_to_ms(frame_idx);
 
         Self {
+            video,
             frame,
             frame_idx,
             time: TimeRange::new(exact_time, fps.milliseconds() / fps.frames()),
@@ -37,7 +49,7 @@ impl FrameInfo {
     ///
     /// However, if the video has been started with an offset this will be
     /// incorrect
-    pub fn idx(&self) -> usize {
+    pub fn frame_idx(&self) -> usize {
         self.frame_idx
     }
 }

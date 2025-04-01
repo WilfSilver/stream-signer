@@ -11,7 +11,7 @@ use thiserror::Error;
 
 use crate::utils::{Subject, SubjectState, UnknownKey};
 
-use super::{FrameInfo, SigOperationError};
+use super::{FrameState, SigOperationError};
 
 #[derive(Debug, Error, Clone)]
 pub enum InvalidSignatureError {
@@ -64,6 +64,6 @@ impl SignatureState {
 // TODO: Make this interface slightly more compact please
 #[derive(Debug)]
 pub struct VerifiedFrame {
-    pub info: FrameInfo,
+    pub state: FrameState,
     pub sigs: Vec<SignatureState>,
 }

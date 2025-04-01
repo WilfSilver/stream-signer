@@ -1,11 +1,34 @@
-use std::{ops::Range, sync::Arc};
+use std::{
+    future::{self, Future},
+    ops::Range,
+    pin::Pin,
+    sync::Arc,
+};
 
-use crate::{file::Timestamp, spec::Coord, utils::TimeRange, video::FrameInfo};
+use futures::FutureExt;
+
+use crate::{file::Timestamp, spec::Coord, utils::TimeRange, video::FrameState};
 
 use super::{ChunkSigner, Signer};
 
 pub trait Controller<S: Signer> {
-    fn get_chunk(&mut self, info: &FrameInfo) -> Option<ChunkSigner<S>>;
+    fn get_chunk(
+        &mut self,
+        state: &FrameState,
+    ) -> Pin<Box<dyn Future<Output = Option<ChunkSigner<S>>>>>;
+}
+
+pub trait SyncController<S: Signer> {
+    fn get_chunk(&mut self, state: &FrameState) -> Option<ChunkSigner<S>>;
+}
+
+impl<S: Signer + 'static, C: SyncController<S>> Controller<S> for C {
+    fn get_chunk(
+        &mut self,
+        state: &FrameState,
+    ) -> Pin<Box<dyn Future<Output = Option<ChunkSigner<S>>>>> {
+        future::ready(self.get_chunk(state)).boxed()
+    }
 }
 
 #[derive(Debug)]
@@ -59,13 +82,13 @@ impl<S: Signer> IntervalController<S> {
     }
 }
 
-impl<S: Signer> Controller<S> for IntervalController<S> {
-    fn get_chunk(&mut self, info: &FrameInfo) -> Option<ChunkSigner<S>> {
-        let time = self.convert_time(info.time)?;
-        println!("{time:?}");
+impl<S: Signer> SyncController<S> for IntervalController<S> {
+    fn get_chunk(&mut self, state: &FrameState) -> Option<ChunkSigner<S>> {
+        let time = self.convert_time(state.time)?;
+
         if !time.is_start() && (time % self.interval).is_first() {
             let mut res = ChunkSigner::new(
-                info.time.start() - self.interval,
+                state.time.start() - self.interval,
                 self.signer.clone(),
                 !self.is_start,
             );

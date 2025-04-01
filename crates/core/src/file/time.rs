@@ -17,7 +17,7 @@ pub const ONE_HOUR_MILLIS: u32 = 60 * ONE_MINUTE_MILLIS;
 
 /// Wrapper for the timestamp to help converting between `u32` (the milliseconds)
 /// and `srtlib::Timestamp`
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timestamp(u32);
 
 impl Display for Timestamp {
@@ -111,6 +111,12 @@ impl From<SrtTimestamp> for Timestamp {
 impl From<Timestamp> for SrtTimestamp {
     fn from(value: Timestamp) -> Self {
         SrtTimestamp::from_milliseconds(*value)
+    }
+}
+
+impl From<gst::format::Time> for Timestamp {
+    fn from(value: gst::format::Time) -> Self {
+        Timestamp(value.mseconds() as u32)
     }
 }
 
