@@ -116,7 +116,7 @@ impl<'a> SignedChunk<'a> {
 ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
 /// };
 ///
-/// sf.push(SignedInterval::new(0.into(), 1000.into(), vec![signature_info]));
+/// sf.push(SignedInterval::new(0.into(), 1000.into(), signature_info));
 ///
 /// sf.write("./mysignatures.ssrt").expect("Failed to write signature file");
 /// ```
@@ -138,7 +138,7 @@ pub struct SignFile(Lapper<u32, ChunkSignature>);
 
 impl SignFile {
     pub fn new() -> Self {
-        SignFile(Lapper::new(vec![]))
+        SignFile(Lapper::new(Vec::new()))
     }
 
     /// Reads the buffer as the contents of a file trying to convert it into
@@ -189,7 +189,7 @@ impl SignFile {
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };
     ///
-    /// sf.push(SignedInterval::new(0.into(), 1000.into(), vec![signature_info]));
+    /// sf.push(SignedInterval::new(0.into(), 1000.into(), signature_info));
     ///
     /// sf.write("./mysignatures.ssrt").expect("Failed to write to file");
     /// ```
@@ -244,7 +244,7 @@ impl SignFile {
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };
     ///
-    /// sf.push(SignedInterval::new(0.into(), 1000.into(), vec![signature_info]));
+    /// sf.push(SignedInterval::new(0.into(), 1000.into(), signature_info));
     ///
     /// sf.write("./mysignatures.ssrt").expect("Failed to write sign file");
     /// ```
@@ -301,8 +301,8 @@ impl Extend<SignedInterval> for SignFile {
     /// };
     ///
     /// sf.extend(vec![
-    ///   SignedInterval::new(0.into(), 1000.into(), vec![first_signature]),
-    ///   SignedInterval::new(1000.into(), 2000.into(), vec![second_signature]),
+    ///   SignedInterval::new(0.into(), 1000.into(), first_signature),
+    ///   SignedInterval::new(1000.into(), 2000.into(), second_signature),
     ///   // ...
     /// ]);
     ///

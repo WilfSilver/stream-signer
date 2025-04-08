@@ -307,7 +307,7 @@ mod signing {
         /// # Ok(())
         /// # }
         /// ```
-        pub fn sign_with_all<C, S: Signer + 'static>(
+        pub fn sign_with_all<S: Signer + 'static>(
             self,
             controllers: Vec<Box<dyn Controller<S>>>,
         ) -> Result<impl Stream<Item = Result<SignedInterval, SigningError>>, StreamError> {
@@ -701,7 +701,7 @@ mod tests {
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
         let signfile = pipe
-            .sign_with_all::<sign::IntervalController<TestIdentity>, TestIdentity>(vec![
+            .sign_with_all(vec![
                 Box::new(sign::IntervalController::build(
                     Arc::new(alice_identity),
                     alice_chunk_size,
