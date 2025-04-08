@@ -11,7 +11,7 @@ use identity_iota::{
 };
 
 use crate::file::Timestamp;
-use crate::spec::{ChunkSignature, Coord, PresentationOrId};
+use crate::spec::{ChunkSignature, PresentationOrId, Vec2u};
 
 pub trait KeyBound: JwkStorage {}
 impl<T: JwkStorage> KeyBound for T {}
@@ -73,6 +73,7 @@ pub trait Signer: Sync + Send {
         }
     }
 }
+
 /// Stores the information necessary to sign a given second of a video, here
 /// note that the end time is implied at when you give this information to the
 /// signing algorithm
@@ -82,7 +83,7 @@ pub struct ChunkSigner<S: Signer> {
     /// right
     ///
     /// Note: If this is given, it is assumed you have defined the size
-    pub pos: Option<Coord>,
+    pub pos: Option<Vec2u>,
 
     /// The given information to prove your credability as well as the
     /// information to create any signatures
@@ -92,7 +93,7 @@ pub struct ChunkSigner<S: Signer> {
     /// the window.
     ///
     /// Note: If this is given, it is assumed you have defined the position
-    pub size: Option<Coord>,
+    pub size: Option<Vec2u>,
     pub start: Timestamp,
 
     /// If this is set, we will only return a reference of the definition
@@ -114,7 +115,7 @@ impl<S: Signer> ChunkSigner<S> {
 
     /// Assigns the information about the position and size of embedding to
     /// be signed
-    pub fn with_embedding(mut self, pos: Coord, size: Coord) -> Self {
+    pub fn with_embedding(mut self, pos: Vec2u, size: Vec2u) -> Self {
         self.pos = Some(pos);
         self.size = Some(size);
         self
@@ -125,7 +126,7 @@ impl<S: Signer> ChunkSigner<S> {
     pub async fn sign(
         self,
         msg: Vec<u8>,
-        size: Coord,
+        size: Vec2u,
     ) -> Result<ChunkSignature, JwkStorageDocumentError> {
         let presentation: PresentationOrId = if self.is_ref {
             PresentationOrId::new_ref(self.signer.get_presentation_id())

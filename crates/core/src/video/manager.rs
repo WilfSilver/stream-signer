@@ -12,7 +12,7 @@ use gst::prelude::{ElementExt, GstBinExt};
 use gst_app::AppSink;
 use tokio::sync::Mutex;
 
-use crate::{file::Timestamp, spec::Coord};
+use crate::{file::Timestamp, spec::Vec2u};
 
 use super::{
     Frame, FrameState, Framerate, Pipeline, SigOperationError, StreamError, MAX_CHUNK_LENGTH,
@@ -31,8 +31,8 @@ pub trait FrameBuffer {
     /// should be signed for a given position and size of the viewing window
     fn get_cropped_buffer(
         &self,
-        pos: Coord,
-        size: Coord,
+        pos: Vec2u,
+        size: Vec2u,
         range: Range<usize>,
     ) -> Result<Vec<u8>, SigOperationError> {
         // TODO: Add audio
@@ -254,9 +254,9 @@ impl<FC> FrameManager<FC> {
         })
     }
 
-    /// Returns the width and height of the frame as a [Coord]
-    pub fn size(&self) -> Coord {
-        Coord::new(self.raw.width(), self.raw.height())
+    /// Returns the width and height of the frame as a [Vec2u]
+    pub fn size(&self) -> Vec2u {
+        Vec2u::new(self.raw.width(), self.raw.height())
     }
 }
 

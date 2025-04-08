@@ -5,7 +5,7 @@ use gst_video::VideoFrameExt;
 
 pub use image::GenericImageView;
 
-use crate::{spec::Coord, video::SigOperationError};
+use crate::{spec::Vec2u, video::SigOperationError};
 
 use super::{Framerate, ImageFns};
 
@@ -20,8 +20,8 @@ impl Frame {
     /// the image, if it is not it will return a [SigOperationError::InvalidCrop]
     pub fn cropped_buffer(
         &self,
-        pos: Coord,
-        size: Coord,
+        pos: Vec2u,
+        size: Vec2u,
     ) -> Result<impl Iterator<Item = u8> + '_, SigOperationError> {
         if pos.x + size.x > self.width()
             || pos.y + size.y > self.height()

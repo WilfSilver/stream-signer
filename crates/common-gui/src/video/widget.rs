@@ -1,30 +1,54 @@
 use std::marker::PhantomData;
 
-use druid::{Data, Event, LifeCycle, LifeCycleCtx, Rect, RenderContext, Size, Widget};
+use druid::{
+    Code, Data, Event, LifeCycle, LifeCycleCtx, UnitPoint, Widget, WidgetExt, widget::ZStack,
+};
+use futures::executor;
 
-use crate::state::VideoState;
+use crate::{showif::ShowIfExt, state::VideoState};
 
-use super::{VideoPlayer, overlay::VideoOverlay};
+use super::{VideoFeed, bar::make_bar, frame::FrameWidget, play_btn::make_play_btn};
 
-pub struct VideoWidget<C: VideoPlayer<T>, T: Clone + Data> {
-    overlay: VideoOverlay,
-    inner: C,
+pub struct VideoWidget<F: VideoFeed<VideoState<T>>, T: Clone + Data> {
+    feed: F,
+    inner: ZStack<VideoState<T>>,
     _phantom: PhantomData<T>,
 }
 
-impl<C: VideoPlayer<T>, T: Clone + Data> VideoWidget<C, T> {
-    pub fn new(inner: C) -> Self {
+impl<F: VideoFeed<VideoState<T>>, T: Clone + Data> VideoWidget<F, T> {
+    pub fn new<O: Widget<VideoState<T>> + 'static>(feed: F, overlay_extra: Option<O>) -> Self {
+        let mut gui_stack = ZStack::new(FrameWidget::default().lens(VideoState::curr_frame));
+
+        if let Some(extra) = overlay_extra {
+            gui_stack = gui_stack.with_aligned_child(extra, UnitPoint::TOP_RIGHT);
+        }
+
+        gui_stack = gui_stack
+            .with_centered_child(
+                make_play_btn()
+                    .lens(VideoState::playing)
+                    .show_if(VideoState::show_overlay),
+            )
+            .with_aligned_child(
+                make_bar()
+                    .lens(VideoState::progress)
+                    .show_if(VideoState::show_overlay),
+                UnitPoint::BOTTOM_LEFT,
+            );
+
         VideoWidget {
-            overlay: VideoOverlay::default(),
-            inner,
+            inner: gui_stack,
+            feed,
             _phantom: PhantomData,
         }
     }
+
+    async fn flip_playing(&mut self, data: &mut VideoState<T>) {
+        data.playing = !data.ctrl.flip().await;
+    }
 }
 
-impl<C: VideoPlayer<VideoState<T>>, T: Clone + Data> Widget<VideoState<T>>
-    for VideoWidget<C, VideoState<T>>
-{
+impl<F: VideoFeed<VideoState<T>>, T: Clone + Data> Widget<VideoState<T>> for VideoWidget<F, T> {
     fn event(
         &mut self,
         ctx: &mut druid::EventCtx,
@@ -35,11 +59,23 @@ impl<C: VideoPlayer<VideoState<T>>, T: Clone + Data> Widget<VideoState<T>>
         match event {
             // We use animation frame to get focus on start
             Event::AnimFrame(_) => ctx.request_focus(),
+            Event::KeyDown(id) if id.code == Code::Space => {
+                data.moved();
+                executor::block_on(self.flip_playing(data));
+                ctx.request_update(); // It sometimes doesn't believe the data has been changed
+                ctx.set_handled();
+            }
+            Event::KeyDown(id) if id.code != Code::Enter => {
+                data.moved();
+            }
+            Event::MouseMove(_) => {
+                data.moved();
+            }
             _ => {}
         }
 
-        self.overlay.event(ctx, event, data, env);
         self.inner.event(ctx, event, data, env);
+        self.feed.handle_event(ctx, event, data, env);
     }
 
     fn update(
@@ -52,7 +88,6 @@ impl<C: VideoPlayer<VideoState<T>>, T: Clone + Data> Widget<VideoState<T>>
         if !old_data.same(data) {
             ctx.request_paint();
         }
-        self.overlay.update(ctx, old_data, data, env);
         self.inner.update(ctx, old_data, data, env);
     }
 
@@ -64,7 +99,6 @@ impl<C: VideoPlayer<VideoState<T>>, T: Clone + Data> Widget<VideoState<T>>
         env: &druid::Env,
     ) -> druid::Size {
         self.inner.layout(ctx, bc, data, env);
-        self.overlay.layout(ctx, bc, data, env);
 
         bc.max()
     }
@@ -81,39 +115,14 @@ impl<C: VideoPlayer<VideoState<T>>, T: Clone + Data> Widget<VideoState<T>>
             ctx.request_anim_frame();
 
             let event_sink = ctx.get_external_handle();
-            self.inner
-                .spawn_player(event_sink, self.overlay.state().clone(), data.clone());
+            self.feed
+                .spawn_player(event_sink, data.ctrl.clone(), data.clone());
         }
 
-        self.overlay.lifecycle(ctx, event, data, env);
         self.inner.lifecycle(ctx, event, data, env);
     }
 
     fn paint(&mut self, ctx: &mut druid::PaintCtx, data: &VideoState<T>, env: &druid::Env) {
-        if let Some(image) = data.get_curr_image(ctx) {
-            let info = data.curr_frame.as_ref().unwrap();
-            let f_width = info.frame.width() as f64;
-            let f_height = info.frame.height() as f64;
-
-            let size = ctx.size();
-            let s_width = size.width;
-            let s_height = size.height;
-
-            let h_scale = s_height / f_height;
-            let w_scale = s_width / f_width;
-
-            // We want to scale towards the smallest size, leaving black bars
-            // everywhere else
-            let scaler = w_scale.min(h_scale);
-            let size = Size::new(f_width * scaler, f_height * scaler);
-            // Center black bars
-            let (x, y) = ((s_width - size.width) / 2., (s_height - size.height) / 2.);
-            let rect = Rect::new(x, y, x + size.width, y + size.height);
-
-            ctx.draw_image(&image, rect, druid::piet::InterpolationMode::Bilinear);
-        }
-
         self.inner.paint(ctx, data, env);
-        self.overlay.paint(ctx, data, env);
     }
 }

@@ -1,12 +1,12 @@
 use std::{fs::File, ops::Deref, sync::Arc};
 
-use common_gui::video::{PlayerState, VideoPlayer};
+use common_gui::video::{PlayerCtrl, VideoFeed};
 use druid::{
     piet::RenderContext,
     widget::{Label, List, Painter, Scroll},
-    BoxConstraints, Color, Data, Event, Lens, LifeCycle, LifeCycleCtx, PaintCtx, Widget, WidgetExt,
+    Color, Data, Event, ExtEventSink, Lens, PaintCtx, Widget, WidgetExt,
 };
-use futures::{FutureExt, StreamExt};
+use futures::StreamExt;
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use im::Vector;
 use serde_json::json;
@@ -47,8 +47,6 @@ impl Data for SigState {
             _ => false,
         };
 
-        // println!("Same: {res} : {self:?} | {other:?}");
-
         res
     }
 }
@@ -68,86 +66,78 @@ pub struct VideoOptions {
     pub sigs: Vector<SigState>,
 }
 
-pub struct VerifyPlayer {
-    pub sig_list: Box<dyn Widget<VideoOptions>>,
+pub fn make_sig_list_overlay() -> impl Widget<VideoOptions> {
+    Scroll::new(
+        List::new(|| {
+            Label::new(|item: &SigState, _env: &_| {
+                let name = match item.deref() {
+                    SignatureState::Invalid(_) => "Invalid".to_string(),
+                    SignatureState::Unresolved(_) => "Could not resolve".to_string(),
+                    SignatureState::Verified(i)
+                    | SignatureState::Unverified {
+                        subject: i,
+                        error: _,
+                    } => i.creds()[0]
+                        .credential
+                        .credential_subject
+                        .first()
+                        .unwrap()
+                        .properties
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .map(ToString::to_string)
+                        .unwrap_or("Unknown".to_string()),
+                };
+
+                name
+            })
+            // .align_vertical(UnitPoint::LEFT)
+            .padding(10.)
+            // .expand()
+            .fix_size(150., 50.)
+            .background(Painter::new(
+                |ctx: &mut PaintCtx, data: &SigState, _env: &_| {
+                    let color = match data.deref() {
+                        SignatureState::Verified(_) => Color::rgb(0., 1., 0.),
+                        SignatureState::Invalid(_)
+                        | SignatureState::Unverified {
+                            error: _,
+                            subject: _,
+                        } => Color::rgb(1., 0., 0.),
+                        SignatureState::Unresolved(_) => Color::rgb(0.5, 0.5, 0.),
+                    };
+
+                    let bounds = ctx.size().to_rect();
+                    ctx.fill(bounds, &color);
+                },
+            ))
+        })
+        .with_spacing(10.)
+        .align_right(),
+    )
+    .vertical()
+    .lens(VideoOptions::sigs)
 }
 
-impl VideoPlayer<VideoOptions> for VerifyPlayer {
-    fn spawn_player(
-        &self,
-        event_sink: druid::ExtEventSink,
-        state: Arc<Mutex<PlayerState>>,
-        options: VideoOptions,
+pub struct VerifyFeed;
+
+impl VideoFeed<VideoOptions> for VerifyFeed {
+    fn spawn_player(&self, event_sink: ExtEventSink, ctrl: PlayerCtrl, options: VideoOptions) {
+        tokio::spawn(Self::watch_video(event_sink, ctrl, options));
+    }
+
+    fn handle_event(
+        &mut self,
+        _ctx: &mut druid::EventCtx,
+        _event: &Event,
+        _data: &mut VideoOptions,
+        _env: &druid::Env,
     ) {
-        tokio::spawn(Self::watch_video(event_sink, state, options));
     }
 }
 
-impl VerifyPlayer {
-    pub fn new() -> Self {
-        let sig_list = Box::new(
-            Scroll::new(
-                List::new(|| {
-                    Label::new(|item: &SigState, _env: &_| {
-                        let name = match item.deref() {
-                            SignatureState::Invalid(_) => "Invalid".to_string(),
-                            SignatureState::Unresolved(_) => "Could not resolve".to_string(),
-                            SignatureState::Verified(i)
-                            | SignatureState::Unverified {
-                                subject: i,
-                                error: _,
-                            } => i.creds()[0]
-                                .credential
-                                .credential_subject
-                                .first()
-                                .unwrap()
-                                .properties
-                                .get("name")
-                                .and_then(|v| v.as_str())
-                                .map(ToString::to_string)
-                                .unwrap_or("Unknown".to_string()),
-                        };
-
-                        println!("Label: {}", &name);
-
-                        name
-                    })
-                    // .align_vertical(UnitPoint::LEFT)
-                    .padding(10.)
-                    // .expand()
-                    .fix_size(150., 50.)
-                    .background(Painter::new(
-                        |ctx: &mut PaintCtx, data: &SigState, _env: &_| {
-                            let color = match data.deref() {
-                                SignatureState::Verified(_) => Color::rgb(0., 1., 0.),
-                                SignatureState::Invalid(_)
-                                | SignatureState::Unverified {
-                                    error: _,
-                                    subject: _,
-                                } => Color::rgb(1., 0., 0.),
-                                SignatureState::Unresolved(_) => Color::rgb(0.5, 0.5, 0.),
-                            };
-
-                            let bounds = ctx.size().to_rect();
-                            ctx.fill(bounds, &color);
-                        },
-                    ))
-                })
-                .with_spacing(10.)
-                .align_right(),
-            )
-            .vertical()
-            .lens(VideoOptions::sigs),
-        );
-
-        VerifyPlayer { sig_list }
-    }
-
-    async fn watch_video(
-        event_sink: druid::ExtEventSink,
-        state: Arc<Mutex<PlayerState>>,
-        options: VideoOptions,
-    ) {
+impl VerifyFeed {
+    async fn watch_video(event_sink: ExtEventSink, ctrl: PlayerCtrl, options: VideoOptions) {
         gst::init().expect("Failed gstreamer");
 
         let client = {
@@ -190,89 +180,31 @@ impl VerifyPlayer {
             .verify(&resolver, &signfile)
             .expect("Failed to start verifying");
 
-        iter.for_each(|frame| async {
-            let Ok(info) = frame else {
-                return;
-            };
+        iter.for_each(|frame| {
+            let event_sink = event_sink.clone();
+            let mut ctrl = ctrl.clone();
+            async move {
+                let Ok(info) = frame else {
+                    return;
+                };
 
-            let time = info.state.time;
-            let duration = info.state.video.duration;
+                // Wait until playing
+                // We don't want to have the state locked while awaiting
+                // the pause to stop
+                ctrl.wait_if_paused(&info.state.pipe).await;
 
-            // Wait until playing
-            // We don't want to have the state locked while awaiting
-            // the pause to stop
-            state
-                .lock()
-                .map(|mut s| {
-                    s.set_pos(time.start());
-                    s.set_duration(duration);
-                    s.playing.clone()
-                })
-                .await
-                .wait_if_paused(&info.state.pipe)
-                .await;
-
-            event_sink.add_idle_callback(move |data: &mut AppData| {
-                data.video.curr_frame = Some((&info.state).into());
-                data.video.options.sigs =
-                    Vector::from_iter(info.sigs.iter().cloned().map(SigState));
-            });
+                event_sink.add_idle_callback(move |data: &mut AppData| {
+                    data.video.update_frame(info.state.clone());
+                    data.video.options.sigs =
+                        Vector::from_iter(info.sigs.iter().cloned().map(SigState));
+                });
+            }
         })
         .await;
 
         // TODO: Have a button to return to the main menu
-        event_sink.add_idle_callback(move |data: &mut AppData| {
+        event_sink.add_idle_callback(|data: &mut AppData| {
             data.view = View::MainMenu;
         });
-    }
-}
-
-impl Widget<VideoOptions> for VerifyPlayer {
-    fn event(
-        &mut self,
-        ctx: &mut druid::EventCtx,
-        event: &Event,
-        data: &mut VideoOptions,
-        env: &druid::Env,
-    ) {
-        self.sig_list.event(ctx, event, data, env);
-    }
-
-    fn update(
-        &mut self,
-        ctx: &mut druid::UpdateCtx,
-        old_data: &VideoOptions,
-        data: &VideoOptions,
-        env: &druid::Env,
-    ) {
-        self.sig_list.update(ctx, old_data, data, env);
-    }
-
-    fn layout(
-        &mut self,
-        ctx: &mut druid::LayoutCtx,
-        bc: &druid::BoxConstraints,
-        data: &VideoOptions,
-        env: &druid::Env,
-    ) -> druid::Size {
-        let margin = druid::Size::new(10., 10.);
-        let inner_padding = BoxConstraints::new(bc.min() + margin, bc.max() - margin);
-        self.sig_list.layout(ctx, &inner_padding, data, env);
-
-        bc.max()
-    }
-
-    fn lifecycle(
-        &mut self,
-        ctx: &mut LifeCycleCtx,
-        event: &LifeCycle,
-        data: &VideoOptions,
-        env: &druid::Env,
-    ) {
-        self.sig_list.lifecycle(ctx, event, data, env);
-    }
-
-    fn paint(&mut self, ctx: &mut druid::PaintCtx, data: &VideoOptions, env: &druid::Env) {
-        self.sig_list.paint(ctx, data, env);
     }
 }
