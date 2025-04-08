@@ -100,7 +100,7 @@ impl<'a> SignedChunk<'a> {
 /// ```no_run
 /// use stream_signer::{
 ///     file::{SignedInterval, SignFile},
-///     spec::{ChunkSignature, Coord, PresentationOrId},
+///     spec::{ChunkSignature, Vec2u, PresentationOrId},
 /// };
 /// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
 ///
@@ -110,8 +110,8 @@ impl<'a> SignedChunk<'a> {
 /// let s = "i0aL5051w2ADiUk3nljIz1Fk91S3ux3UTidX/B4EU058IKuzD9gcZ3vXAfS2coeCC4gRSiJSmDocHDeXW5tMCw";
 ///
 /// let signature_info = ChunkSignature {
-///      pos: Coord::new(0, 0),
-///      size: Coord::new(1920, 1080),
+///      pos: Vec2u::new(0, 0),
+///      size: Vec2u::new(1920, 1080),
 ///      presentation: PresentationOrId::new_ref("my_presentation_id"),
 ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
 /// };
@@ -173,7 +173,7 @@ impl SignFile {
     /// ```no_run
     /// use stream_signer::{
     ///     file::{SignFile, SignedInterval},
-    ///     spec::{Coord, PresentationOrId, ChunkSignature},
+    ///     spec::{Vec2u, PresentationOrId, ChunkSignature},
     /// };
     /// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
     ///
@@ -183,8 +183,8 @@ impl SignFile {
     /// let s = "i0aL5051w2ADiUk3nljIz1Fk91S3ux3UTidX/B4EU058IKuzD9gcZ3vXAfS2coeCC4gRSiJSmDocHDeXW5tMCw";
     ///
     /// let signature_info = ChunkSignature {
-    ///      pos: Coord::new(0, 0),
-    ///      size: Coord::new(1920, 1080),
+    ///      pos: Vec2u::new(0, 0),
+    ///      size: Vec2u::new(1920, 1080),
     ///      presentation: PresentationOrId::new_ref("my_presentation_id"),
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };
@@ -228,7 +228,7 @@ impl SignFile {
     /// ```no_run
     /// use stream_signer::{
     ///     file::{SignFile, SignedInterval},
-    ///     spec::{Coord, PresentationOrId, ChunkSignature},
+    ///     spec::{Vec2u, PresentationOrId, ChunkSignature},
     /// };
     /// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
     ///
@@ -238,8 +238,8 @@ impl SignFile {
     /// let s = "i0aL5051w2ADiUk3nljIz1Fk91S3ux3UTidX/B4EU058IKuzD9gcZ3vXAfS2coeCC4gRSiJSmDocHDeXW5tMCw";
     ///
     /// let signature_info = ChunkSignature {
-    ///      pos: Coord::new(0, 0),
-    ///      size: Coord::new(1920, 1080),
+    ///      pos: Vec2u::new(0, 0),
+    ///      size: Vec2u::new(1920, 1080),
     ///      presentation: PresentationOrId::new_ref("my_presentation_id"),
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };
@@ -277,7 +277,7 @@ impl Extend<SignedInterval> for SignFile {
     /// ```no_run
     /// use stream_signer::{
     ///     file::{SignFile, SignedInterval},
-    ///     spec::{Coord, PresentationOrId, ChunkSignature},
+    ///     spec::{Vec2u, PresentationOrId, ChunkSignature},
     /// };
     /// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
     ///
@@ -287,15 +287,15 @@ impl Extend<SignedInterval> for SignFile {
     /// let s = "i0aL5051w2ADiUk3nljIz1Fk91S3ux3UTidX/B4EU058IKuzD9gcZ3vXAfS2coeCC4gRSiJSmDocHDeXW5tMCw";
     ///
     /// let first_signature = ChunkSignature {
-    ///      pos: Coord::new(0, 0),
-    ///      size: Coord::new(1920, 1080),
+    ///      pos: Vec2u::new(0, 0),
+    ///      size: Vec2u::new(1920, 1080),
     ///      presentation: PresentationOrId::new_ref("my_presentation_id"),
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };
     ///
     /// let second_signature = ChunkSignature {
-    ///      pos: Coord::new(0, 0),
-    ///      size: Coord::new(1920, 1080),
+    ///      pos: Vec2u::new(0, 0),
+    ///      size: Vec2u::new(1920, 1080),
     ///      presentation: PresentationOrId::new_ref("my_presentation_id"),
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };

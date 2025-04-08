@@ -1,7 +1,7 @@
 use std::{
     fs::File,
     sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc,
     },
 };
@@ -10,10 +10,12 @@ use std::io::prelude::*;
 
 use common_gui::{
     state::VideoState,
-    video::{PlayerState, VideoPlayer},
+    video::{PlayerCtrl, VideoFeed},
 };
-use druid::{Code, Color, Data, Event, Lens, LifeCycle, LifeCycleCtx, RenderContext, Widget};
-use futures::{FutureExt, TryStreamExt};
+use druid::{
+    Code, Color, Data, Event, ExtEventSink, Lens, LifeCycle, LifeCycleCtx, RenderContext, Widget,
+};
+use futures::TryStreamExt;
 use identity_iota::{
     core::{FromJson, ToJson},
     credential::Subject,
@@ -35,27 +37,75 @@ use crate::state::{AppData, View};
 pub struct VideoOptions {
     pub src: String,
     pub output: String,
+    #[data(eq)]
+    pub last_sign: Timestamp,
+    #[data(ignore)]
+    pub sign_ctrl: Arc<AtomicBool>,
 }
 
-pub struct SignPlayer {
-    sign_info: Arc<(AtomicBool, AtomicU32)>,
-}
+pub struct SignOverlay;
 
-impl SignPlayer {
-    pub fn new() -> Self {
-        let sign_last_chunk = Arc::new((AtomicBool::new(false), AtomicU32::new(0)));
-
-        SignPlayer {
-            sign_info: sign_last_chunk,
-        }
+impl Widget<State> for SignOverlay {
+    fn event(
+        &mut self,
+        _ctx: &mut druid::EventCtx,
+        _event: &Event,
+        _data: &mut State,
+        _env: &druid::Env,
+    ) {
     }
 
-    async fn watch_video(
-        event_sink: druid::ExtEventSink,
-        state: Arc<Mutex<PlayerState>>,
-        sign_last_chunk: Arc<(AtomicBool, AtomicU32)>,
-        options: VideoOptions,
+    fn update(
+        &mut self,
+        _ctx: &mut druid::UpdateCtx,
+        _old_data: &State,
+        _data: &State,
+        _env: &druid::Env,
     ) {
+    }
+
+    fn layout(
+        &mut self,
+        _ctx: &mut druid::LayoutCtx,
+        bc: &druid::BoxConstraints,
+        _data: &State,
+        _env: &druid::Env,
+    ) -> druid::Size {
+        bc.max()
+    }
+
+    fn lifecycle(
+        &mut self,
+        _ctx: &mut LifeCycleCtx,
+        _event: &LifeCycle,
+        _data: &State,
+        _env: &druid::Env,
+    ) {
+    }
+
+    fn paint(&mut self, ctx: &mut druid::PaintCtx, data: &State, _env: &druid::Env) {
+        let Some(info) = &data.curr_frame else {
+            return;
+        };
+
+        let sign_border_length = 500;
+        let time_since_last_sign = info.time.start() - data.options.last_sign;
+        if time_since_last_sign < sign_border_length.into() {
+            let sbl = sign_border_length as f64;
+            let rect = ctx.size().to_rect();
+            ctx.stroke(
+                rect,
+                &Color::rgba(1., 0., 0., (sbl - *time_since_last_sign as f64) / sbl),
+                50.,
+            );
+        }
+    }
+}
+
+pub struct SignFeed;
+
+impl SignFeed {
+    async fn watch_video(event_sink: ExtEventSink, ctrl: PlayerCtrl, options: VideoOptions) {
         gst::init().expect("Failed gstreamer");
 
         let client = get_client();
@@ -97,52 +147,48 @@ impl SignPlayer {
 
         // Cache of the last sign, also stored in the AtomicU32 (but stored as
         // timestamp)
-        let mut last_sign: Timestamp = 0.into();
+        let last_sign = Arc::new(Mutex::new(Timestamp::default()));
         let signfile = pipe
             .sign_async(|info| {
+                let last_sign = last_sign.clone();
                 let signer = signer.clone();
                 let event_sink = event_sink.clone();
-                let sign_last_chunk = sign_last_chunk.clone();
-                let state = state.clone();
+                let sign_ctrl = options.sign_ctrl.clone();
+                let mut ctrl = ctrl.clone();
 
                 async move {
                     let time = info.time;
-                    let duration = info.video.duration;
 
                     // Wait until playing
                     // We don't want to have the state locked while awaiting
                     // the pause to stop
-                    state
-                        .lock()
-                        .map(|mut s| {
-                            s.set_pos(time.start());
-                            s.set_duration(duration);
-                            s.playing.clone()
-                        })
-                        .await
-                        .wait_if_paused(&info.pipe)
-                        .await;
+                    ctrl.wait_if_paused(&info.pipe).await;
 
                     event_sink.add_idle_callback(move |data: &mut AppData| {
                         data.video.update_frame(info);
                     });
 
+                    let mut last_sign = last_sign.lock().await;
+
                     // We want to sign when requested, or if the next frame is going to be past the
                     // maximum chunk signing length
                     let next_frame_time =
-                        *(time.start() - last_sign) as f64 + time.frame_duration();
-                    if sign_last_chunk.0.load(Ordering::Relaxed)
+                        *(time.start() - *last_sign) as f64 + time.frame_duration();
+                    if sign_ctrl.load(Ordering::Relaxed)
                         || next_frame_time >= MAX_CHUNK_LENGTH as f64
                     {
                         let res = vec![ChunkSigner::new(
-                            last_sign,
+                            *last_sign,
                             signer.clone(),
-                            last_sign != 0.into(),
+                            *last_sign != 0.into(),
                         )];
 
-                        sign_last_chunk.0.store(false, Ordering::Relaxed);
-                        last_sign = time.start();
-                        sign_last_chunk.1.store(last_sign.into(), Ordering::Relaxed);
+                        sign_ctrl.store(false, Ordering::Relaxed);
+                        *last_sign = time.start();
+
+                        event_sink.add_idle_callback(move |data: &mut AppData| {
+                            data.video.options.last_sign = time.start();
+                        });
 
                         res
                     } else {
@@ -167,83 +213,24 @@ impl SignPlayer {
 
 type State = VideoState<VideoOptions>;
 
-impl VideoPlayer<State> for SignPlayer {
-    fn spawn_player(
-        &self,
-        event_sink: druid::ExtEventSink,
-        state: Arc<Mutex<PlayerState>>,
-        initial: State,
-    ) {
-        let sign_info = self.sign_info.clone();
-        tokio::spawn(Self::watch_video(
-            event_sink,
-            state,
-            sign_info,
-            initial.options,
-        ));
+impl VideoFeed<VideoOptions> for SignFeed {
+    fn spawn_player(&self, event_sink: ExtEventSink, ctrl: PlayerCtrl, initial: VideoOptions) {
+        tokio::spawn(Self::watch_video(event_sink, ctrl, initial));
     }
-}
 
-impl Widget<State> for SignPlayer {
-    fn event(
+    fn handle_event(
         &mut self,
         ctx: &mut druid::EventCtx,
         event: &Event,
-        _data: &mut State,
+        data: &mut VideoOptions,
         _env: &druid::Env,
     ) {
         match event {
             Event::KeyDown(id) if id.code == Code::Enter => {
-                self.sign_info.0.store(true, Ordering::Relaxed);
+                data.sign_ctrl.store(true, Ordering::Relaxed);
                 ctx.set_handled();
             }
             _ => {}
-        }
-    }
-
-    fn update(
-        &mut self,
-        _ctx: &mut druid::UpdateCtx,
-        _old_data: &State,
-        _data: &State,
-        _env: &druid::Env,
-    ) {
-    }
-
-    fn layout(
-        &mut self,
-        _ctx: &mut druid::LayoutCtx,
-        bc: &druid::BoxConstraints,
-        _data: &State,
-        _env: &druid::Env,
-    ) -> druid::Size {
-        bc.max()
-    }
-
-    fn lifecycle(
-        &mut self,
-        _ctx: &mut LifeCycleCtx,
-        _event: &LifeCycle,
-        _data: &State,
-        _env: &druid::Env,
-    ) {
-    }
-
-    fn paint(&mut self, ctx: &mut druid::PaintCtx, data: &State, _env: &druid::Env) {
-        let Some(info) = &data.curr_frame else {
-            return;
-        };
-
-        let sign_border_length = 500;
-        let time_since_last_sign = info.time.start() - self.sign_info.1.load(Ordering::Relaxed);
-        if time_since_last_sign < sign_border_length.into() {
-            let sbl = sign_border_length as f64;
-            let rect = ctx.size().to_rect();
-            ctx.stroke(
-                rect,
-                &Color::rgba(1., 0., 0., (sbl - *time_since_last_sign as f64) / sbl),
-                50.,
-            );
         }
     }
 }

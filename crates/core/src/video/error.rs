@@ -6,7 +6,7 @@ use crate::utils::UnknownKey;
 
 use thiserror::Error;
 
-use crate::{file::Timestamp, spec::Coord};
+use crate::{file::Timestamp, spec::Vec2u};
 
 use super::builder::BuilderError;
 
@@ -63,7 +63,7 @@ pub enum SigOperationError {
     #[error("The size of the chunk spread over {0} ms which is not allowed")]
     InvalidChunkSize(usize),
     #[error("Could not crop frame with pos {0:?} and size {1:?}")]
-    InvalidCrop(Coord, Coord),
+    InvalidCrop(Vec2u, Vec2u),
     #[cfg(feature = "verifying")]
     #[error(transparent)]
     UnknownCredential(#[from] UnknownKey),

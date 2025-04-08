@@ -7,7 +7,7 @@ use std::{
 
 use futures::FutureExt;
 
-use crate::{file::Timestamp, spec::Coord, utils::TimeRange, video::FrameState};
+use crate::{file::Timestamp, spec::Vec2u, utils::TimeRange, video::FrameState};
 
 use super::{ChunkSigner, Signer};
 
@@ -33,8 +33,8 @@ impl<S: Signer + 'static, C: SyncController<S>> Controller<S> for C {
 
 #[derive(Debug)]
 pub struct Embedding {
-    pub pos: Coord,
-    pub size: Coord,
+    pub pos: Vec2u,
+    pub size: Vec2u,
 }
 
 #[derive(Debug)]
@@ -58,7 +58,7 @@ impl<S: Signer> IntervalController<S> {
         }
     }
 
-    pub fn with_embedding(mut self, pos: Coord, size: Coord) -> Self {
+    pub fn with_embedding(mut self, pos: Vec2u, size: Vec2u) -> Self {
         self.embedding = Some(Embedding { pos, size });
         self
     }

@@ -487,7 +487,7 @@ mod tests {
     use super::*;
 
     use crate::{
-        spec::Coord,
+        spec::Vec2u,
         video::{
             sign::{self, Controller},
             verify::SignatureState,
@@ -855,7 +855,7 @@ mod tests {
     async fn sign_and_verify_embedding() -> Result<(), Box<dyn Error>> {
         sign_and_verify_int(|i| {
             sign::IntervalController::build(i, 100)
-                .with_embedding(Coord::new(10, 10), Coord::new(100, 100))
+                .with_embedding(Vec2u::new(10, 10), Vec2u::new(100, 100))
         })
         .await
     }
@@ -887,16 +887,16 @@ mod tests {
 
         for size in [(1000, 50), (50, 1000), (1000, 1000)]
             .into_iter()
-            .map(Coord::from)
+            .map(Vec2u::from)
         {
             let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
             let ctrl = sign::IntervalController::build(identity.clone(), 100)
-                .with_embedding(Coord::new(0, 0), size);
+                .with_embedding(Vec2u::new(0, 0), size);
 
             let res = pipe.sign_with(ctrl)?.try_collect::<SignFile>().await;
 
-            const POS: Coord = Coord::new(0, 0);
+            const POS: Vec2u = Vec2u::new(0, 0);
 
             assert!(
                 matches!(
@@ -938,15 +938,15 @@ mod tests {
 
         let filepath = test_video(videos::BIG_BUNNY);
 
-        for size in [(0, 50), (50, 0), (0, 0)].into_iter().map(Coord::from) {
+        for size in [(0, 50), (50, 0), (0, 0)].into_iter().map(Vec2u::from) {
             let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
             let ctrl = sign::IntervalController::build(identity.clone(), 100)
-                .with_embedding(Coord::new(0, 0), size);
+                .with_embedding(Vec2u::new(0, 0), size);
 
             let res = pipe.sign_with(ctrl)?.try_collect::<SignFile>().await;
 
-            const POS: Coord = Coord::new(0, 0);
+            const POS: Vec2u = Vec2u::new(0, 0);
             assert!(
                 matches!(
                     res,
@@ -989,16 +989,16 @@ mod tests {
 
         for pos in [(1000, 50), (50, 1000), (1000, 1000)]
             .into_iter()
-            .map(Coord::from)
+            .map(Vec2u::from)
         {
             let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
             let ctrl = sign::IntervalController::build(identity.clone(), 100)
-                .with_embedding(pos, Coord::new(1, 1));
+                .with_embedding(pos, Vec2u::new(1, 1));
 
             let res = pipe.sign_with(ctrl)?.try_collect::<SignFile>().await;
 
-            const SIZE: Coord = Coord::new(1, 1);
+            const SIZE: Vec2u = Vec2u::new(1, 1);
             assert!(
                 matches!(
                     res,
@@ -1054,7 +1054,7 @@ mod tests {
             (1000, 1000),
         ]
         .into_iter()
-        .map(Coord::from)
+        .map(Vec2u::from)
         {
             // Secretly just change the size as technically we won't get to the
             // verification stage
@@ -1088,7 +1088,7 @@ mod tests {
                                 SignatureState::Invalid(
                                     InvalidSignatureError::Operation(
                                         SigOperationError::InvalidCrop(
-                                            Coord { x: 0, y: 0},
+                                            Vec2u { x: 0, y: 0},
                                             esize,
                                         ),
                                     ),
@@ -1141,7 +1141,7 @@ mod tests {
 
         for pos in [(1000, 50), (50, 1000), (1000, 1000)]
             .into_iter()
-            .map(Coord::from)
+            .map(Vec2u::from)
         {
             // Secretly just change the pos as technically we won't get to the
             // verification stage
@@ -1149,7 +1149,7 @@ mod tests {
                 .iter()
                 .cloned()
                 .map(|mut i| {
-                    i.val.size = Coord::new(1, 1);
+                    i.val.size = Vec2u::new(1, 1);
                     i.val.pos = pos;
                     i
                 })
@@ -1177,7 +1177,7 @@ mod tests {
                                     InvalidSignatureError::Operation(
                                         SigOperationError::InvalidCrop(
                                             epos,
-                                            Coord { x: 1, y: 1},
+                                            Vec2u { x: 1, y: 1},
                                         ),
                                     ),
                                 ) if *epos == pos
