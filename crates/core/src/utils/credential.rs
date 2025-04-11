@@ -105,12 +105,12 @@ type IntMap = HashMap<String, SubjectState>;
 
 /// Stores the defined credentials so it can be easily accessed later on
 #[derive(Debug)]
-pub struct CredentialStore<'a> {
-    resolver: &'a Resolver,
+pub struct CredentialStore {
+    resolver: Arc<Resolver>,
     map: IntMap,
 }
 
-impl<'a> CredentialStore<'a> {
+impl CredentialStore {
     /// Creates a new [CredentialStore] with the given [Resolver].
     ///
     /// ## Example
@@ -136,7 +136,9 @@ impl<'a> CredentialStore<'a> {
     /// let mut resolver = Resolver::new();
     /// resolver.attach_iota_handler(client);
     ///
-    /// let store = CredentialStore::new(&resolver);
+    /// let resolver = Arc::new(resolver);
+    ///
+    /// let store = CredentialStore::new(resolver);
     ///
     /// # Ok(())
     /// # }
@@ -181,7 +183,7 @@ impl<'a> CredentialStore<'a> {
     ///
     /// let store = CredentialStore::new(&resolver);
     /// ```
-    pub fn new(resolver: &'a Resolver) -> Self {
+    pub fn new(resolver: Arc<Resolver>) -> Self {
         Self {
             resolver,
             map: HashMap::default(),
@@ -282,7 +284,7 @@ impl<'a> CredentialStore<'a> {
     }
 }
 
-impl Deref for CredentialStore<'_> {
+impl Deref for CredentialStore {
     type Target = IntMap;
     fn deref(&self) -> &Self::Target {
         &self.map

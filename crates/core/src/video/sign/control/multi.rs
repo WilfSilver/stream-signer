@@ -1,5 +1,3 @@
-use std::future;
-
 use futures::{future::BoxFuture, stream, FutureExt, StreamExt};
 
 use crate::video::{ChunkSigner, FrameState, Signer};
@@ -20,8 +18,7 @@ impl<S: Signer + 'static> Controller<S> for MultiController<S> {
     #[inline]
     fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<S>>> {
         stream::iter(self.0.iter())
-            .then(move |ctrl| ctrl.get_chunk(&state))
-            .filter_map(|res| future::ready(res))
+            .filter_map(move |ctrl| ctrl.get_chunk(&state))
             .collect::<Vec<_>>()
             .boxed()
     }

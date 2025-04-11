@@ -50,7 +50,7 @@ pub fn get_client() -> Arc<Mutex<MemClient>> {
     Arc::new(Mutex::new(MemClient::default()))
 }
 
-pub fn get_resolver(client: Arc<Mutex<MemClient>>) -> Resolver {
+pub fn get_resolver(client: Arc<Mutex<MemClient>>) -> Arc<Resolver> {
     let mut resolver = Resolver::<CoreDocument>::new();
 
     resolver.attach_handler(METHOD.to_owned(), move |did: CoreDID| {
@@ -61,5 +61,5 @@ pub fn get_resolver(client: Arc<Mutex<MemClient>>) -> Resolver {
         }
     });
 
-    resolver
+    Arc::new(resolver)
 }

@@ -48,7 +48,7 @@ mod verifying {
     use identity_iota::prelude::Resolver;
 
     use futures::{stream, Stream, StreamExt};
-    use std::pin::Pin;
+    use std::{pin::Pin, sync::Arc, time::Instant};
 
     use crate::{
         utils::{Delayed, DelayedStream},
@@ -62,14 +62,12 @@ mod verifying {
 
     impl SignPipeline {
         // TODO: Write documentation :)
-        pub fn verify<'a>(
+        pub fn verify(
             self,
-            resolver: &'a Resolver,
-            signfile: &'a SignFile,
-        ) -> Result<
-            impl Stream<Item = Result<Pin<Box<VerifiedFrame>>, StreamError>> + use<'a>,
-            StreamError,
-        > {
+            resolver: Arc<Resolver>,
+            signfile: SignFile,
+        ) -> Result<impl Stream<Item = Result<Pin<Box<VerifiedFrame>>, StreamError>>, StreamError>
+        {
             let context = SigVideoContext::new(signfile, resolver);
 
             let iter = self.try_into_iter(context)?;
@@ -90,31 +88,38 @@ mod verifying {
 
             let delayed = DelayedStream::<_, _>::new(buf_capacity, stream::iter(iter));
 
-            let s = synced;
             let res = delayed
                 .zip(stream::iter(std::iter::repeat(video_state)))
-                .filter_map(move |(d_info, state)| async move {
+                .filter_map(|(d_info, state)| async {
                     match d_info {
                         Delayed::Partial(_) => None,
-                        Delayed::Full(a, fut) => {
-                            if a.0 == 0 && s {
-                                state.set_clock_sync(true);
-                            }
-                            Some(((a.0, a.1.clone(), fut), state))
-                        }
+                        Delayed::Full(a, fut) => Some(((a.0, a.1.clone(), fut), state)),
                     }
                 })
                 .then(move |(frame_state, video_state)| async move {
+                    let start = Instant::now();
                     let manager = match verification::Manager::new(video_state, frame_state) {
                         Ok(m) => m,
                         Err(e) => return Err(e),
                     };
 
+                    let fps = manager.fps();
                     let info = manager.get_frame_state().await;
 
                     let sigs = manager.verify_signatures().await;
 
                     let res = Box::pin(VerifiedFrame { state: info, sigs });
+                    if synced {
+                        // NOTE: This code looks a bit weird, mostly because
+                        // there are various issues with the simple answers:
+                        // - Just awaiting the sleep blocks all other
+                        //   tokio::spawn, defeating the purpose of them
+                        // - Using executor::block_on breaks down due to the
+                        //   potential chance of < 1ms times used
+                        tokio::spawn(fps.sleep_for_rest(start.elapsed()))
+                            .await
+                            .expect("Failed to wait for sleep to finish");
+                    }
 
                     Ok(res)
                 });
@@ -520,7 +525,7 @@ mod tests {
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
         let mut count = 0;
-        pipe.verify(&resolver, &signfile)?
+        pipe.verify(resolver, signfile)?
             .for_each(|v| {
                 count += 1;
 
@@ -618,7 +623,7 @@ mod tests {
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
         let mut count = 0;
-        pipe.verify(&resolver, &signfile)?
+        pipe.verify(resolver, signfile)?
             .for_each(|v| {
                 count += 1;
 
@@ -704,7 +709,7 @@ mod tests {
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
         let mut count = 0;
-        pipe.verify(&resolver, &signfile)?
+        pipe.verify(resolver, signfile)?
             .for_each(|v| {
                 count += 1;
 
@@ -1057,7 +1062,7 @@ mod tests {
             let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
             let mut count = 0;
-            pipe.verify(&resolver, &signfile)?
+            pipe.verify(resolver.clone(), signfile)?
                 .for_each(|v| {
                     count += 1;
 
@@ -1145,7 +1150,7 @@ mod tests {
             let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
             let mut count = 0;
-            pipe.verify(&resolver, &signfile)?
+            pipe.verify(resolver.clone(), signfile)?
                 .for_each(|v| {
                     count += 1;
 
@@ -1230,7 +1235,7 @@ mod tests {
             let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
             let mut count = 0;
-            pipe.verify(&resolver, &signfile)?
+            pipe.verify(resolver.clone(), signfile)?
                 .for_each(|v| {
                     count += 1;
 
@@ -1304,7 +1309,7 @@ mod tests {
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
         let mut count = 0;
-        pipe.verify(&resolver, &signfile)?
+        pipe.verify(resolver, signfile)?
             .for_each(|v| {
                 count += 1;
 

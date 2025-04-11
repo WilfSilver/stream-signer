@@ -23,6 +23,7 @@ pub enum InvalidSignatureError {
 
 #[derive(Debug, Clone)]
 pub enum SignatureState {
+    Loading,
     Invalid(InvalidSignatureError),
     Unverified {
         error: Arc<SingleStructError<SignatureVerificationErrorKind>>,

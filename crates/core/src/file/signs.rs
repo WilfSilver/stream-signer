@@ -89,6 +89,12 @@ impl<'a> SignedChunk<'a> {
     }
 }
 
+impl<'a> From<SignedChunk<'a>> for SignedInterval {
+    fn from(value: SignedChunk<'a>) -> Self {
+        SignedInterval::new(value.range.start, value.range.end, value.signature.clone())
+    }
+}
+
 /// Cache of information about all the signatures for one video. This includes
 /// support for overlapping time ranges.
 ///

@@ -63,13 +63,22 @@ pub trait FrameBuffer {
 /// Both [FrameState] and [PipeState] have their own contexts, which is basically
 /// a structure of extra information which then can be used by their respective
 /// impelementations
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct PipeManager<VC, FC> {
     /// The information stored about the frame itself
     pub frame: Arc<FrameManager<FC>>,
     /// The information about the pipes state and other information which was
     /// needed when building the pipeline
     pub state: Arc<PipeState<VC>>,
+}
+
+impl<VC, FC> Clone for PipeManager<VC, FC> {
+    fn clone(&self) -> Self {
+        Self {
+            frame: self.frame.clone(),
+            state: self.state.clone(),
+        }
+    }
 }
 
 impl<VC, FC> PipeManager<VC, FC> {
@@ -507,7 +516,7 @@ pub mod verification {
         verification::jws::{JwsAlgorithm, VerificationInput},
     };
 
-    use crate::{file::SignedChunk, utils::CredentialStore, video::SignatureState, SignFile};
+    use crate::{file::SignedInterval, utils::CredentialStore, video::SignatureState, SignFile};
 
     use super::*;
 
@@ -517,26 +526,26 @@ pub mod verification {
 
     /// This is the specific implementation of the [PipeManager] used when
     /// verifying
-    pub type Manager<'a> = PipeManager<SigVideoContext<'a>, FutureFramesContext>;
+    pub type Manager = PipeManager<SigVideoContext, FutureFramesContext>;
 
     /// This describes the ID we use to uniquely identify signed chunks
-    type SigID<'a> = (Timestamp, &'a Vec<u8>);
-    type SigCache<'a> = HashMap<SigID<'a>, SignatureState>;
+    type SigID = (Timestamp, usize);
+    type SigCache = HashMap<SigID, SignatureState>;
 
     /// This stores the specific information about the Video that is needed
     /// when verifying
-    pub struct SigVideoContext<'a> {
+    pub struct SigVideoContext {
         /// The cache of the verified signatures with their states
-        pub cache: Mutex<SigCache<'a>>,
+        pub cache: Mutex<SigCache>,
         /// A cache of the credential/presentations that have been
         /// defined up to this current point
-        pub credentials: Mutex<CredentialStore<'a>>,
+        pub credentials: Mutex<CredentialStore>,
         /// The sign file with all the signatures themselves
-        pub signfile: &'a SignFile,
+        pub signfile: SignFile,
     }
 
-    impl<'a> SigVideoContext<'a> {
-        pub fn new(signfile: &'a SignFile, resolver: &'a Resolver) -> Self {
+    impl SigVideoContext {
+        pub fn new(signfile: SignFile, resolver: Arc<Resolver>) -> Self {
             Self {
                 cache: Mutex::new(HashMap::new()),
                 credentials: Mutex::new(CredentialStore::new(resolver)),
@@ -547,7 +556,7 @@ pub mod verification {
 
     pub type FutureFramesContext = Box<[Arc<(usize, Result<Frame, glib::Error>)>]>;
 
-    impl<'a> Manager<'a> {
+    impl Manager {
         /// This will verify all the signatures for the current frame
         pub async fn verify_signatures(self) -> Vec<SignatureState> {
             self.sigs_iter().collect::<Vec<SignatureState>>().await
@@ -555,42 +564,58 @@ pub mod verification {
 
         /// Iterates through all the signatures that apply to the current frame,
         /// and verifies it, outputing an iterator of the resultant [SignatureState]
-        fn sigs_iter(self) -> impl Stream<Item = SignatureState> + 'a {
+        fn sigs_iter(&self) -> impl Stream<Item = SignatureState> + '_ {
             let sigs = self
                 .state
                 .context
                 .signfile
                 .get_signatures_at(self.frame.timestamp);
 
-            stream::iter(sigs.zip(std::iter::repeat(Arc::new(self)))).then(
-                |(chunk, manager)| async move {
-                    let cache_key = (chunk.range.start, &chunk.signature.signature);
+            stream::iter(sigs.zip(std::iter::repeat(self))).then(|(chunk, manager)| async move {
+                let cache_key = (
+                    chunk.range.start,
+                    // TODO: I don't think this is technically safe
+                    chunk.signature.signature.as_ptr() as usize,
+                );
 
-                    let mut state_cache = manager.state.context.cache.lock().await;
+                // Query the cache without locking it for longer than
+                // required
+                let mut cache = manager.state.context.cache.lock().await;
 
-                    // Due to us having to pass to the output of the iterator
-                    let state = match state_cache.get(&cache_key) {
-                        Some(s) => s.clone(),
-                        None => {
-                            let state = manager.verify_sig(&chunk).await;
-                            state_cache.insert(cache_key, state.clone());
-                            state
-                        }
-                    };
+                // Due to us having to pass to the output of the iterator
+                let state = match cache.get(&cache_key) {
+                    Some(s) => s.clone(),
+                    None => {
+                        // Temporarily set to loading before we spin off
+                        // another thread
+                        cache.insert(cache_key, SignatureState::Loading);
 
-                    state
-                },
-            )
+                        // Validate the signature on a separate thread
+                        // so it doesn't affect the video itself
+                        let m = manager.clone();
+                        let interval: SignedInterval = chunk.into();
+                        tokio::spawn(async move {
+                            let state = m.verify_sig(interval).await;
+                            let mut cache = m.state.context.cache.lock().await;
+                            cache.insert(cache_key, state);
+                        });
+
+                        SignatureState::Loading
+                    }
+                };
+
+                state
+            })
         }
 
         /// Verifies a single chunk
-        async fn verify_sig(&self, chunk: &SignedChunk<'a>) -> SignatureState {
-            let end_frame =
-                self.convert_to_frames(chunk.range.end) - self.convert_to_frames(chunk.range.start);
+        async fn verify_sig(&self, chunk: SignedInterval) -> SignatureState {
+            let end_frame = self.convert_to_frames(chunk.stop.into())
+                - self.convert_to_frames(chunk.start.into());
 
-            let sig = chunk.signature;
+            let sig = &chunk.val;
 
-            let length: usize = (chunk.range.end - chunk.range.start).into();
+            let length: usize = (chunk.stop - chunk.start) as usize;
             if !(MIN_CHUNK_LENGTH..=MAX_CHUNK_LENGTH).contains(&length) {
                 return SignatureState::Invalid(SigOperationError::InvalidChunkSize(length).into());
             }
