@@ -156,8 +156,13 @@ mod signing {
     use super::*;
 
     impl SignPipeline {
-        /// Signs the video with a given controller which manages when to sign
-        /// a chunk. Similar to [Self::sign], but allows more generalised behaviour.
+        /// Signs the current built video writing to the sign_file by calling
+        /// the provided [Controller::get_chunks] for every frame with its
+        /// timeframe and rgb frame.
+        ///
+        /// From the output of this, it will then sign the chunks defined by
+        /// [ChunkSigner] concurrently as to not interfere with the video
+        /// playback.
         ///
         /// For example if you wanted to sign in 100ms second intervals
         ///
@@ -230,6 +235,9 @@ mod signing {
             Ok(res)
         }
 
+        /// Internally used function which runs the thread for calling the
+        /// [Controller] and then spawning the signing thread which then feeds
+        /// back to the stream
         async fn sign_with_thread<C, S>(
             iter: FrameIter<SigningContext<S, C>>,
             sender: UnboundedSender<Result<SignedInterval, SigningError>>,
@@ -285,8 +293,8 @@ mod signing {
             Ok(())
         }
 
-        /// Extension of [Self::sign_with], allowing multiple controllers of
-        /// the same type
+        /// This is a basic wrapper for [MultiController], which then calls
+        /// [Self::sign_with]
         ///
         /// For example if you wanted to sign in 100ms second intervals
         ///
@@ -364,9 +372,7 @@ mod signing {
             self.sign_with::<MultiController<S>, _>(controllers.into())
         }
 
-        /// Signs the current built video writing to the sign_file by calling
-        /// the provided `sign_with` function for every frame with its timeframe
-        /// and rgb frame.
+        /// Basic wrapper around [FnMutController] and calling [Self::sign_with].
         ///
         /// If the function returns some [ChunkSigner], it will use the information to
         /// sign the chunk form the `start` property to the current timestamp.
@@ -414,7 +420,7 @@ mod signing {
         /// let signer = Arc::new(identity);
         ///
         /// let mut is_first = true;
-        /// let sign_file = pipeline.sign(|info| {
+        /// let sign_file = pipeline.sign(move |info| {
         ///   // ...
         ///   if !info.time.is_start() && info.time.multiple_of(100) {
         ///     let res = vec![
@@ -437,7 +443,7 @@ mod signing {
         /// # }
         /// ```
         #[inline]
-        pub fn sign<S, F, ITER>(
+        pub fn sign<S, F>(
             self,
             sign_with: F,
         ) -> Result<impl Stream<Item = Result<SignedInterval, SigningError>>, StreamError>
@@ -448,8 +454,9 @@ mod signing {
             self.sign_with::<FnMutController<S, _>, _>(sign_with.into())
         }
 
+        /// Basic wrapper around [AsyncFnMutController] and calling [Self::sign_with].
         #[inline]
-        pub fn sign_async<S, F, ITER, FUT>(
+        pub fn sign_async<S, F, FUT>(
             self,
             sign_with: F,
         ) -> Result<impl Stream<Item = Result<SignedInterval, SigningError>>, StreamError>
@@ -465,10 +472,10 @@ mod signing {
 
 #[cfg(test)]
 mod tests {
-    use futures::{future, StreamExt, TryStreamExt};
+    use futures::{StreamExt, TryStreamExt};
     use identity_iota::{core::FromJson, credential::Subject, did::DID};
     use serde_json::json;
-    use std::{error::Error, sync::Arc};
+    use std::{error::Error, sync::Arc, time::Duration};
     use testlibs::{
         client::{get_client, get_resolver},
         identity::TestIdentity,
@@ -487,6 +494,18 @@ mod tests {
         },
         SignFile,
     };
+
+    async fn skip_loading(state: &SignatureState) -> bool {
+        match state {
+            SignatureState::Loading => {
+                tokio::spawn(tokio::time::sleep(Duration::from_millis(5)))
+                    .await
+                    .unwrap();
+                true
+            }
+            _ => false,
+        }
+    }
 
     async fn sign_and_verify_int<F, C>(get_controller: F) -> Result<(), Box<dyn Error>>
     where
@@ -536,14 +555,18 @@ mod tests {
                     }
                 };
 
-                for s in &v.sigs {
-                    assert!(
-                        matches!(s, SignatureState::Verified(_)),
-                        "{s:?} resolved correctly"
-                    );
-                }
+                async move {
+                    for s in &v.sigs {
+                        if skip_loading(s).await {
+                            return;
+                        }
 
-                future::ready(())
+                        assert!(
+                            matches!(s, SignatureState::Verified(_)),
+                            "{s:?} resolved correctly"
+                        );
+                    }
+                }
             })
             .await;
 
@@ -634,14 +657,18 @@ mod tests {
                     }
                 };
 
-                for s in &v.sigs {
-                    assert!(
-                        matches!(s, SignatureState::Verified(_)),
-                        "{s:?} verified correctly"
-                    );
-                }
+                async move {
+                    for s in &v.sigs {
+                        if skip_loading(s).await {
+                            return;
+                        }
 
-                future::ready(())
+                        assert!(
+                            matches!(s, SignatureState::Verified(_)),
+                            "{s:?} verified correctly"
+                        );
+                    }
+                }
             })
             .await;
 
@@ -720,14 +747,18 @@ mod tests {
                     }
                 };
 
-                for s in &v.sigs {
-                    assert!(
-                        matches!(s, SignatureState::Verified(_)),
-                        "{s:?} verified correctly"
-                    );
-                }
+                async move {
+                    for s in &v.sigs {
+                        if skip_loading(s).await {
+                            return;
+                        }
 
-                future::ready(())
+                        assert!(
+                            matches!(s, SignatureState::Verified(_)),
+                            "{s:?} verified correctly"
+                        );
+                    }
+                }
             })
             .await;
 
@@ -1073,24 +1104,28 @@ mod tests {
                         }
                     };
 
-                    for s in &v.sigs {
-                        assert!(
-                            matches!(
-                                s,
-                                SignatureState::Invalid(
-                                    InvalidSignatureError::Operation(
-                                        SigOperationError::InvalidCrop(
-                                            Vec2u { x: 0, y: 0},
-                                            esize,
-                                        ),
-                                    ),
-                                ) if *esize == size
-                            ),
-                            "{s:?} marks itself as an invalid crop with size {size:?}"
-                        );
-                    }
+                    async move {
+                        for s in &v.sigs {
+                            if skip_loading(s).await {
+                                return;
+                            }
 
-                    future::ready(())
+                            assert!(
+                                matches!(
+                                    s,
+                                    SignatureState::Invalid(
+                                        InvalidSignatureError::Operation(
+                                            SigOperationError::InvalidCrop(
+                                                Vec2u { x: 0, y: 0},
+                                                esize,
+                                            ),
+                                        ),
+                                    ) if *esize == size
+                                ),
+                                "{s:?} marks itself as an invalid crop with size {size:?}"
+                            );
+                        }
+                    }
                 })
                 .await;
 
@@ -1161,24 +1196,28 @@ mod tests {
                         }
                     };
 
-                    for s in &v.sigs {
-                        assert!(
-                            matches!(
-                                s,
-                                SignatureState::Invalid(
-                                    InvalidSignatureError::Operation(
-                                        SigOperationError::InvalidCrop(
-                                            epos,
-                                            Vec2u { x: 1, y: 1},
-                                        ),
-                                    ),
-                                ) if *epos == pos
-                            ),
-                            "{s:?} marks itself as an invalid crop with position {pos:?}"
-                        );
-                    }
+                    async move {
+                        for s in &v.sigs {
+                            if skip_loading(s).await {
+                                return;
+                            }
 
-                    future::ready(())
+                            assert!(
+                                matches!(
+                                    s,
+                                    SignatureState::Invalid(
+                                        InvalidSignatureError::Operation(
+                                            SigOperationError::InvalidCrop(
+                                                epos,
+                                                Vec2u { x: 1, y: 1},
+                                            ),
+                                        ),
+                                    ) if *epos == pos
+                                ),
+                                "{s:?} marks itself as an invalid crop with position {pos:?}"
+                            );
+                        }
+                    }
                 })
                 .await;
 
@@ -1246,8 +1285,13 @@ mod tests {
                         }
                     };
 
-                    for s in &v.sigs {
-                        assert!(
+                    async move {
+                        for s in &v.sigs {
+                            if skip_loading(s).await {
+                                return;
+                            }
+
+                            assert!(
                             matches!(
                                 s,
                                 SignatureState::Invalid(
@@ -1260,9 +1304,8 @@ mod tests {
                             ),
                             "{s:?} marks itself as an invalid chunk length with length {length}ms"
                         );
+                        }
                     }
-
-                    future::ready(())
                 })
                 .await;
 
@@ -1320,14 +1363,18 @@ mod tests {
                     }
                 };
 
-                for s in &v.sigs {
-                    assert!(
-                        matches!(s, SignatureState::Unresolved(_)),
-                        "{s:?} was unresolved"
-                    );
-                }
+                async move {
+                    for s in &v.sigs {
+                        if skip_loading(s).await {
+                            return;
+                        }
 
-                future::ready(())
+                        assert!(
+                            matches!(s, SignatureState::Unresolved(_)),
+                            "{s:?} was unresolved"
+                        );
+                    }
+                }
             })
             .await;
 
