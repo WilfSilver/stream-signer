@@ -23,15 +23,14 @@ use identity_iota::{
 };
 use serde_json::json;
 use stream_signer::{
-    file::Timestamp,
-    gst,
-    video::{builder::FramerateOption, ChunkSigner, MAX_CHUNK_LENGTH},
-    SignFile, SignPipeline,
+    file::Timestamp, gst, video::builder::FramerateOption, SignFile, SignPipeline,
 };
 use testlibs::{client::get_client, identity::TestIdentity, issuer::TestIssuer};
-use tokio::sync::Mutex;
 
-use crate::state::{AppData, View};
+use crate::{
+    controller::SignController,
+    state::{AppData, View},
+};
 
 #[derive(Clone, Data, Default, Lens)]
 pub struct VideoOptions {
@@ -112,7 +111,6 @@ impl SignFeed {
         let issuer = TestIssuer::new(client.clone())
             .await
             .expect("Failed to create issuer");
-        // let resolver = get_resolver(client);
 
         let identity = TestIdentity::new(&issuer, |id| {
             Subject::from_json_value(json!({
@@ -147,55 +145,10 @@ impl SignFeed {
 
         // Cache of the last sign, also stored in the AtomicU32 (but stored as
         // timestamp)
-        let last_sign = Arc::new(Mutex::new(Timestamp::default()));
+        // let last_sign = Arc::new(Mutex::new(Timestamp::default()));
+        let ctrl = SignController::new(signer, event_sink.clone(), options.sign_ctrl, ctrl);
         let signfile = pipe
-            .sign_async(|info| {
-                let last_sign = last_sign.clone();
-                let signer = signer.clone();
-                let event_sink = event_sink.clone();
-                let sign_ctrl = options.sign_ctrl.clone();
-                let mut ctrl = ctrl.clone();
-
-                async move {
-                    let time = info.time;
-
-                    // Wait until playing
-                    // We don't want to have the state locked while awaiting
-                    // the pause to stop
-                    ctrl.wait_if_paused(&info.pipe).await;
-
-                    event_sink.add_idle_callback(move |data: &mut AppData| {
-                        data.video.update_frame(info);
-                    });
-
-                    let mut last_sign = last_sign.lock().await;
-
-                    // We want to sign when requested, or if the next frame is going to be past the
-                    // maximum chunk signing length
-                    let next_frame_time =
-                        *(time.start() - *last_sign) as f64 + time.frame_duration();
-                    if sign_ctrl.load(Ordering::Relaxed)
-                        || next_frame_time >= MAX_CHUNK_LENGTH as f64
-                    {
-                        let res = vec![ChunkSigner::new(
-                            *last_sign,
-                            signer.clone(),
-                            *last_sign != 0.into(),
-                        )];
-
-                        sign_ctrl.store(false, Ordering::Relaxed);
-                        *last_sign = time.start();
-
-                        event_sink.add_idle_callback(move |data: &mut AppData| {
-                            data.video.options.last_sign = time.start();
-                        });
-
-                        res
-                    } else {
-                        vec![]
-                    }
-                }
-            })
+            .sign_with(ctrl)
             .expect("Failed to initiate video")
             .try_collect::<SignFile>()
             .await

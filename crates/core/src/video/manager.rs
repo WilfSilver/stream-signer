@@ -29,6 +29,10 @@ pub trait FrameBuffer {
 
     /// This uses the [FrameBuffer::with_frames] to return the exact buffer which
     /// should be signed for a given position and size of the viewing window
+    ///
+    /// This is quite a slow function, all tactics to reduce this time have
+    /// been tried, the fact is that cloning this amount of data into a vector
+    /// is just quite slow
     fn get_cropped_buffer(
         &self,
         pos: Vec2u,
@@ -40,7 +44,9 @@ pub trait FrameBuffer {
         let mut frames_buf: Vec<u8> = Vec::new();
         frames_buf.reserve_exact(capacity);
 
-        for f in self.with_frames(range) {
+        let frames = self.with_frames(range);
+
+        for f in frames {
             frames_buf.extend(f.cropped_buffer(pos, size)?);
         }
 
@@ -265,30 +271,42 @@ pub mod sign {
     //! Contains specific implementation of [super::PipeManager] which is for
     //! signing
 
-    use std::{collections::VecDeque, future::Future, pin::Pin};
+    use std::{collections::VecDeque, future::Future, marker::PhantomData, pin::Pin};
 
     use futures::{stream, Stream, StreamExt, TryFutureExt};
     use identity_iota::storage::JwkStorageDocumentError;
 
     use crate::{
         file::SignedInterval,
-        video::{ChunkSigner, FrameState, Signer, SigningError},
+        video::{sign::Controller, ChunkSigner, Signer, SigningError},
     };
 
     use super::*;
 
     /// This stores the extra information that we need when signing frames, as
     /// it doesn't change it is stored in the [PipeState]
-    pub struct SigningContext<S, F, ITER, FUT>
+    pub struct SigningContext<S, C>
     where
         S: Signer + 'static,
-        F: FnMut(FrameState) -> FUT,
-        FUT: Future<Output = ITER>,
-        ITER: IntoIterator<Item = ChunkSigner<S>>,
+        C: Controller<S>,
     {
         /// The function that is given by the user to get the [ChunkSigner]s
         /// which then determine when and how a chunk should be signed
-        pub sign_with: Mutex<F>,
+        pub controller: C,
+        _phatom: PhantomData<S>,
+    }
+
+    impl<S, C> SigningContext<S, C>
+    where
+        S: Signer + 'static,
+        C: Controller<S>,
+    {
+        pub fn new(controller: C) -> Self {
+            Self {
+                controller,
+                _phatom: PhantomData,
+            }
+        }
     }
 
     /// This is the extra context which is used by [FrameState] and stores a
@@ -305,28 +323,23 @@ pub mod sign {
 
     /// This is the specific implementation of the [PipeManager] used by the
     /// signing process
-    pub type Manager<S, F, ITER, FUT> = PipeManager<SigningContext<S, F, ITER, FUT>, MyFrameBuffer>;
-    type MyPipeState<S, F, ITER, FUT> = Arc<PipeState<SigningContext<S, F, ITER, FUT>>>;
+    pub type Manager<S, C> = PipeManager<SigningContext<S, C>, MyFrameBuffer>;
+    type MyPipeState<S, C> = Arc<PipeState<SigningContext<S, C>>>;
 
-    type StatesPair<S, F, ITER, FUT> = (MyPipeState<S, F, ITER, FUT>, Result<Frame, glib::Error>);
-    type EnumeratedStatesPair<S, F, ITER, FUT> = (usize, StatesPair<S, F, ITER, FUT>);
-    type SigningItem<S, F, ITER, FUT> = (
-        EnumeratedStatesPair<S, F, ITER, FUT>,
-        Arc<Mutex<VecDeque<Frame>>>,
-    );
+    type StatesPair<S, C> = (MyPipeState<S, C>, Result<Frame, glib::Error>);
+    type EnumeratedStatesPair<S, C> = (usize, StatesPair<S, C>);
+    type SigningItem<S, C> = (EnumeratedStatesPair<S, C>, Arc<Mutex<VecDeque<Frame>>>);
 
     /// Makes it easily create a manager from an iterator, it is done as such
     /// mostly to make it easier to integrate into existing solutions e.g.
     ///
     /// TODO: Write an example pls
-    pub async fn manage<S, F, ITER, FUT>(
-        ((i, (state, frame)), buffer): SigningItem<S, F, ITER, FUT>,
-    ) -> Result<Manager<S, F, ITER, FUT>, SigningError>
+    pub async fn manage<S, C>(
+        ((i, (state, frame)), buffer): SigningItem<S, C>,
+    ) -> Result<Manager<S, C>, SigningError>
     where
         S: Signer + 'static,
-        F: FnMut(FrameState) -> FUT,
-        FUT: Future<Output = ITER>,
-        ITER: IntoIterator<Item = ChunkSigner<S>>,
+        C: Controller<S>,
     {
         let mut buffer = buffer.lock().await;
 
@@ -408,20 +421,19 @@ pub mod sign {
         }
     }
 
-    impl<S, F, ITER, FUT> Manager<S, F, ITER, FUT>
+    impl<S, C> Manager<S, C>
     where
         S: Signer + 'static,
-        F: FnMut(FrameState) -> FUT,
-        FUT: Future<Output = ITER>,
-        ITER: IntoIterator<Item = ChunkSigner<S>>,
+        C: Controller<S> + 'static,
     {
         /// This calls the `sign_with` function stored in [SigningContext] and returns the result
         /// as an iterator
-        pub async fn request_sign_info(&self) -> impl Iterator<Item = ChunkSigner<S>> {
-            let mut sign_with = self.state.context.sign_with.lock().await;
-            let sign_info = sign_with(self.get_frame_state().await).await;
-
-            sign_info.into_iter()
+        pub async fn request_sign_info(&self) -> Vec<ChunkSigner<S>> {
+            self.state
+                .context
+                .controller
+                .get_chunks(self.get_frame_state().await)
+                .await
         }
 
         /// This performs the signing process by calling the `sign_with` function and signs
@@ -435,10 +447,7 @@ pub mod sign {
             let res = stream::iter(
                 sign_info
                     .into_iter()
-                    .map(|si| self.frame.sign(si, self.state.offset))
-                    // Collect into a vector so we don't have to deal with
-                    // lifetimes even more
-                    .collect::<Vec<_>>(),
+                    .map(move |si| self.frame.sign(si, self.state.offset)),
             )
             .then(|res| async {
                 match res {

@@ -3,6 +3,7 @@ mod debug;
 mod menu;
 mod state;
 mod video;
+mod controller;
 
 use druid::{AppLauncher, WindowDesc};
 use state::{AppData, Delegate};
