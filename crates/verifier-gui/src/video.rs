@@ -71,6 +71,7 @@ pub fn make_sig_list_overlay() -> impl Widget<VideoOptions> {
         List::new(|| {
             Label::new(|item: &SigState, _env: &_| {
                 let name = match item.deref() {
+                    SignatureState::Loading => "Loading".to_string(),
                     SignatureState::Invalid(_) => "Invalid".to_string(),
                     SignatureState::Unresolved(_) => "Could not resolve".to_string(),
                     SignatureState::Verified(i)
@@ -98,6 +99,7 @@ pub fn make_sig_list_overlay() -> impl Widget<VideoOptions> {
             .background(Painter::new(
                 |ctx: &mut PaintCtx, data: &SigState, _env: &_| {
                     let color = match data.deref() {
+                        SignatureState::Loading => Color::rgb(0.5, 0., 0.5),
                         SignatureState::Verified(_) => Color::rgb(0., 1., 0.),
                         SignatureState::Invalid(_)
                         | SignatureState::Unverified {
@@ -177,7 +179,7 @@ impl VerifyFeed {
         let signfile = SignFile::from_file(options.signfile).expect("Failed to read signfile");
 
         let iter = pipe
-            .verify(&resolver, &signfile)
+            .verify(resolver, signfile)
             .expect("Failed to start verifying");
 
         iter.for_each(|frame| {
