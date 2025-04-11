@@ -7,7 +7,7 @@
 
 use std::{ops::Range, sync::Arc};
 
-use glib::object::Cast;
+use glib::object::{Cast, ObjectExt};
 use gst::prelude::{ElementExt, GstBinExt};
 use gst_app::AppSink;
 use tokio::sync::Mutex;
@@ -220,6 +220,39 @@ impl<VC> PipeState<VC> {
             .raw()
             .bus()
             .expect("Failed to get pipeline from bus. Shouldn't happen!")
+    }
+
+    /// Sets the `sync` property in the `sink` to be false so that we
+    /// go through the frames as fast as possible and returns the value
+    /// it was set to
+    pub fn set_clock_sync(&self, val: bool) {
+        let appsink = self
+            .pipe
+            .raw()
+            .by_name(&self.video_sink)
+            .expect("Sink element not found")
+            .downcast::<gst_app::AppSink>()
+            .expect("Sink element is expected to be an appsink!");
+
+        appsink.set_property("sync", val);
+    }
+
+    /// Sets the `sync` property in the `sink` to be false so that we
+    /// go through the frames as fast as possible and returns the value
+    /// it was set to
+    pub fn unsync_clock(&self) -> bool {
+        let appsink = self
+            .pipe
+            .raw()
+            .by_name(&self.video_sink)
+            .expect("Sink element not found")
+            .downcast::<gst_app::AppSink>()
+            .expect("Sink element is expected to be an appsink!");
+
+        let sync = appsink.property("sync");
+        appsink.set_property("sync", false);
+
+        sync
     }
 }
 

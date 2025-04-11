@@ -45,12 +45,10 @@ pub use verifying::*;
 
 #[cfg(feature = "verifying")]
 mod verifying {
-    use glib::object::{Cast, ObjectExt};
-    use gst::prelude::GstBinExt;
     use identity_iota::prelude::Resolver;
 
     use futures::{stream, Stream, StreamExt};
-    use std::{pin::Pin, time::Instant};
+    use std::pin::Pin;
 
     use crate::{
         utils::{Delayed, DelayedStream},
@@ -72,12 +70,12 @@ mod verifying {
             impl Stream<Item = Result<Pin<Box<VerifiedFrame>>, StreamError>> + use<'a>,
             StreamError,
         > {
-            let synced = self.set_clock_unsynced();
-
             let context = SigVideoContext::new(signfile, resolver);
 
             let iter = self.try_into_iter(context)?;
             let video_state = iter.state.clone();
+            let synced = video_state.unsync_clock();
+
             let mut iter = iter.enumerate().peekable();
 
             let buf_capacity = match iter.peek() {
@@ -92,54 +90,36 @@ mod verifying {
 
             let delayed = DelayedStream::<_, _>::new(buf_capacity, stream::iter(iter));
 
+            let s = synced;
             let res = delayed
-                .filter_map(|d_info| async {
+                .zip(stream::iter(std::iter::repeat(video_state)))
+                .filter_map(move |(d_info, state)| async move {
                     match d_info {
                         Delayed::Partial(_) => None,
-                        Delayed::Full(a, fut) => Some((a.0, a.1.clone(), fut)),
+                        Delayed::Full(a, fut) => {
+                            if a.0 == 0 && s {
+                                state.set_clock_sync(true);
+                            }
+                            Some(((a.0, a.1.clone(), fut), state))
+                        }
                     }
                 })
-                .zip(stream::iter(std::iter::repeat(video_state)))
                 .then(move |(frame_state, video_state)| async move {
-                    let now = Instant::now();
                     let manager = match verification::Manager::new(video_state, frame_state) {
                         Ok(m) => m,
                         Err(e) => return Err(e),
                     };
 
-                    let fps = manager.fps();
                     let info = manager.get_frame_state().await;
 
                     let sigs = manager.verify_signatures().await;
 
                     let res = Box::pin(VerifiedFrame { state: info, sigs });
 
-                    if synced {
-                        fps.sleep_for_rest(now.elapsed()).await;
-                    }
-
                     Ok(res)
                 });
 
             Ok(res)
-        }
-
-        /// Sets the `sync` property in the `sink` to be false so that we
-        /// go through the frames as fast as possible and returns the value
-        /// it was set to
-        fn set_clock_unsynced(&self) -> bool {
-            let appsink = self
-                .init
-                .pipe
-                .raw()
-                .by_name(&self.init.video_sink)
-                .expect("Sink element not found")
-                .downcast::<gst_app::AppSink>()
-                .expect("Sink element is expected to be an appsink!");
-            let sync = appsink.property("sync");
-            appsink.set_property("sync", false);
-
-            sync
         }
     }
 }
