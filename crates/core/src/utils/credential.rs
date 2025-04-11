@@ -124,6 +124,8 @@ impl CredentialStore {
     /// #
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn Error>> {
+    /// use std::sync::Arc;
+    ///
     /// use iota_sdk::client::Client;
     /// use identity_iota::resolver::Resolver;
     /// use stream_signer::utils::CredentialStore;
@@ -149,6 +151,8 @@ impl CredentialStore {
     /// For extra examples see [Resolver::attach_handler]
     ///
     /// ```
+    /// use std::sync::Arc;
+    ///
     /// use identity_iota::did::CoreDID;
     /// use identity_iota::document::CoreDocument;
     /// use identity_iota::resolver::Resolver;
@@ -181,7 +185,7 @@ impl CredentialStore {
     ///   async move { future_client.resolve(&did).await }
     /// });
     ///
-    /// let store = CredentialStore::new(&resolver);
+    /// let store = CredentialStore::new(Arc::new(resolver));
     /// ```
     pub fn new(resolver: Arc<Resolver>) -> Self {
         Self {

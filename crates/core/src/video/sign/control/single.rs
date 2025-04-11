@@ -10,7 +10,7 @@ use crate::video::{ChunkSigner, FrameState, Signer};
 /// is [SingleController::get_as_chunks] to help with this e.g.
 ///
 /// ```
-/// use stream_signer::video::sign::control::{Controller, SingleController};
+/// use stream_signer::video::{sign::control::{Controller, SingleController}, ChunkSigner, FrameState, Signer};
 /// use futures::{future::BoxFuture, FutureExt};
 ///
 /// struct MyStruct;
