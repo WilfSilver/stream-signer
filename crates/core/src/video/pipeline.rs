@@ -146,18 +146,23 @@ mod verifying {
 
 #[cfg(feature = "signing")]
 mod signing {
-    use futures::{stream, FutureExt, Stream, StreamExt};
-    use std::{
-        collections::VecDeque,
-        future::{self, Future},
-        pin::Pin,
-        sync::Arc,
+    use futures::{Stream, StreamExt};
+    use std::{collections::VecDeque, future::Future, sync::Arc};
+    use tokio::sync::{
+        mpsc::{self, UnboundedSender},
+        Mutex,
     };
-    use tokio::sync::Mutex;
+    use tokio_stream::wrappers::UnboundedReceiverStream;
 
     use crate::{
         file::SignedInterval,
-        video::{sign::Controller, Frame, FrameState, SigningError},
+        video::{
+            sign::{
+                AsyncFnMutController, Controller, FnMutController, MultiController,
+                SingleController,
+            },
+            Frame, FrameState, SigningError,
+        },
     };
 
     use self::sign::SigningContext;
@@ -220,20 +225,79 @@ mod signing {
         /// # Ok(())
         /// # }
         /// ```
-        pub fn sign_with<C, S: Signer + 'static>(
+        pub fn sign_with<C, S>(
             self,
-            mut controller: C,
+            controller: C,
         ) -> Result<impl Stream<Item = Result<SignedInterval, SigningError>>, StreamError>
         where
+            S: Signer + 'static,
             C: Controller<S> + 'static,
         {
-            // let controller = Arc::new(Mutex::new(controller));
-            self.sign_async(move |info| {
-                controller.get_chunk(&info).map(|r| match r {
-                    Some(res) => vec![res],
-                    None => vec![],
-                })
-            })
+            let (tx, rx) = mpsc::unbounded_channel();
+            let res = UnboundedReceiverStream::new(rx);
+
+            let context = SigningContext::new(controller);
+
+            let iter = self.try_into_iter(context)?;
+
+            tokio::spawn(Self::sign_with_thread(iter, tx));
+
+            Ok(res)
+        }
+
+        async fn sign_with_thread<C, S>(
+            iter: FrameIter<SigningContext<S, C>>,
+            sender: UnboundedSender<Result<SignedInterval, SigningError>>,
+        ) -> Result<(), StreamError>
+        where
+            S: Signer + 'static,
+            C: Controller<S> + 'static,
+        {
+            let mut iter = iter.zip_state().enumerate().peekable();
+
+            let buf_capacity = match iter.peek() {
+                Some(first) => first
+                    .1
+                     .1
+                    .as_ref()
+                    .map_err(|e| e.clone())?
+                    .fps()
+                    .convert_to_frames(MAX_CHUNK_LENGTH),
+                None => 0,
+            };
+
+            let mut buf: VecDeque<Frame> = VecDeque::new();
+            buf.reserve_exact(buf_capacity);
+            let frame_buffer = Arc::new(Mutex::new(buf));
+
+            for constructor in iter.zip(std::iter::repeat(frame_buffer)) {
+                if sender.is_closed() {
+                    return Ok(());
+                }
+
+                let manager = match sign::manage(constructor).await {
+                    Ok(m) => m,
+                    Err(e) => {
+                        if let Err(e) = sender.send(Err(e)) {
+                            println!("Error when sending (exiting thread): {e:?}");
+                            return Ok(());
+                        }
+                        continue;
+                    }
+                };
+
+                let chunks = manager.request_chunks().await;
+
+                let sender = sender.clone();
+                tokio::spawn(chunks.for_each_concurrent(3, move |message| {
+                    if let Err(e) = sender.send(message) {
+                        println!("Error when sending (exiting thread): {e:?}");
+                    }
+                    std::future::ready(())
+                }));
+            }
+
+            Ok(())
         }
 
         /// Extension of [Self::sign_with], allowing multiple controllers of
@@ -307,25 +371,12 @@ mod signing {
         /// # Ok(())
         /// # }
         /// ```
+        #[inline]
         pub fn sign_with_all<S: Signer + 'static>(
             self,
-            controllers: Vec<Box<dyn Controller<S>>>,
+            controllers: Vec<Box<dyn SingleController<S> + Sync + Send + 'static>>,
         ) -> Result<impl Stream<Item = Result<SignedInterval, SigningError>>, StreamError> {
-            let controllers = Arc::new(Mutex::new(controllers));
-            self.sign_async(move |info| {
-                let controllers = controllers.clone();
-
-                async move {
-                    let mut controllers = controllers.lock().await;
-                    stream::iter(controllers.iter_mut())
-                        .then(move |c| c.get_chunk(&info))
-                        .filter(|x| future::ready(Option::is_some(x)))
-                        .map(Option::unwrap)
-                        .collect::<Vec<_>>()
-                        .await
-                    // .collect::<Vec<_>>()
-                }
-            })
+            self.sign_with::<MultiController<S>, _>(controllers.into())
         }
 
         /// Signs the current built video writing to the sign_file by calling
@@ -400,73 +451,29 @@ mod signing {
         /// # Ok(())
         /// # }
         /// ```
+        #[inline]
         pub fn sign<S, F, ITER>(
             self,
             sign_with: F,
         ) -> Result<impl Stream<Item = Result<SignedInterval, SigningError>>, StreamError>
         where
             S: Signer + 'static,
-            F: FnMut(FrameState) -> ITER,
-            ITER: IntoIterator<Item = ChunkSigner<S>>,
-            <ITER as IntoIterator>::IntoIter: Send,
+            F: FnMut(FrameState) -> Vec<ChunkSigner<S>> + Sync + Send + 'static,
         {
-            let sign_with = Arc::new(Mutex::new(sign_with));
-            self.sign_async(move |frame| {
-                let sign_with = sign_with.clone();
-                async move {
-                    let mut sign_with = sign_with.lock().await;
-                    sign_with(frame)
-                }
-            })
+            self.sign_with::<FnMutController<S, _>, _>(sign_with.into())
         }
 
+        #[inline]
         pub fn sign_async<S, F, ITER, FUT>(
             self,
             sign_with: F,
         ) -> Result<impl Stream<Item = Result<SignedInterval, SigningError>>, StreamError>
         where
             S: Signer + 'static,
-            F: FnMut(FrameState) -> FUT,
-            FUT: Future<Output = ITER>,
-            ITER: IntoIterator<Item = ChunkSigner<S>>,
-            <ITER as IntoIterator>::IntoIter: Send,
+            F: FnMut(FrameState) -> FUT + Sync + Send + 'static,
+            FUT: Future<Output = Vec<ChunkSigner<S>>> + Send + 'static,
         {
-            let sign_with = Mutex::new(sign_with);
-            let context = SigningContext { sign_with };
-
-            let mut iter = self
-                .try_into_iter(context)?
-                .zip_state()
-                .enumerate()
-                .peekable();
-
-            let buf_capacity = match iter.peek() {
-                Some(first) => first
-                    .1
-                     .1
-                    .as_ref()
-                    .map_err(|e| e.clone())?
-                    .fps()
-                    .convert_to_frames(MAX_CHUNK_LENGTH),
-                None => 0,
-            };
-
-            let mut buf: VecDeque<Frame> = VecDeque::new();
-            buf.reserve_exact(buf_capacity);
-            let frame_buffer = Arc::new(Mutex::new(buf));
-
-            let res = stream::iter(iter.zip(std::iter::repeat(frame_buffer)))
-                .then(sign::manage)
-                .then(|manager| async {
-                    match manager {
-                        Ok(m) => m.request_chunks().await,
-                        Err(e) => Box::pin(stream::iter([Err(e)]))
-                            as Pin<Box<dyn Stream<Item = _> + Send>>,
-                    }
-                })
-                .flatten();
-
-            Ok(res)
+            self.sign_with::<AsyncFnMutController<S, _, _>, S>(sign_with.into())
         }
     }
 }

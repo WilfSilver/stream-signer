@@ -32,17 +32,18 @@ impl Frame {
         }
 
         let buf = self.raw_buffer();
-        let start_idx = 3 * (pos.x + pos.y * self.width()) as usize;
+        const DEPTH: usize = 3;
+        let start_idx = DEPTH * (pos.x + pos.y * self.width()) as usize;
         // This ends on the first pixel outside the value (which is why we don't add `size.x`)
-        let end_idx = 3 * (pos.x + (pos.y + size.y) * self.width()) as usize;
+        let end_idx = DEPTH * (pos.x + (pos.y + size.y) * self.width()) as usize;
 
         let row_size = size.x as usize * 3;
 
-        let width = self.width();
+        let width = self.width() as usize;
         let it = buf[start_idx..end_idx]
             .iter()
             .enumerate()
-            .filter(move |(i, _)| i % width as usize >= row_size)
+            .filter(move |(i, _)| i % width >= row_size)
             .map(|(_, v)| v)
             .cloned();
 
