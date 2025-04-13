@@ -1,0 +1,38 @@
+[package]
+name = "stream-signer"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["signing", "verifying"]
+signing = []
+verifying = ["credential_store", "delayed_stream"]
+credential_store = []
+delayed_stream = []
+withtestlibs = ["testlibs"]
+
+[dependencies]
+base64 = "0.22.1"
+futures = "0.3.31"
+glib = "0.20.7"
+gst = { package = "gstreamer", version = "0.23.4" }
+gst-app = { package = "gstreamer-app", version = "0.23.4" }
+gst-video = { package = "gstreamer-video", version = "0.23.4" }
+identity_eddsa_verifier = "1.5.0"
+identity_iota = "1.5.0"
+image = { version = "0.25", default-features = false }
+num-traits = "0.2.19"
+pin-project = "1.1.9"
+rust-lapper = { version = "1.1.0", features = ["with_serde"] }
+serde = "1.0.217"
+serde_json = "1.0.138"
+srtlib = "0.2.0"
+thiserror = "2.0.11"
+tokio = { version = "1.43.0", features = ["sync"] }
+
+testlibs = { path = "../testlibs", optional = true }
+tokio-stream = "0.1.17"
+
+[dev-dependencies]
+testlibs = { path = "../testlibs" }
+iota-sdk = { version = "1.1.5", features = ["stronghold"] }
