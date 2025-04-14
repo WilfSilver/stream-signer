@@ -167,61 +167,63 @@ area which has been signed. This object should look as such:
 <!-- TODO: This may need to be updated to another more efficient dataformat -->
 
 ```json
-[
   // An array of Signature objects
-  {
-    "pos": {
-      // Vector object determining where the position starts
-      "x": 0, // Unsigned integeter between 0 and the width of the video
-      "y": 0 // Unsigned integeter between 0 and the height of the video
-    },
-    "size": {
-      // Vector object determining the size of the area which has been signed
-      "x": 1920, // Unsigned integeter between 0 and the width - pos.x of the video
-      "y": 1080 // Unsigned integeter between 0 and the height - pos.y of the video
-    },
-    "credential": {
-      // If the credential already has been defined, we can simple refer to its ID number
-      // defined in its definition
+{
+  "pos": {
+    // Vector object determining where the position starts
+    "x": 0, // Unsigned integeter between 0 and the width of the video
+    "y": 0 // Unsigned integeter between 0 and the height of the video
+  },
+  "size": {
+    // Vector object determining the size of the area which has been signed
+    "x": 1920, // Unsigned integeter between 0 and the width - pos.x of the video
+    "y": 1080 // Unsigned integeter between 0 and the height - pos.y of the video
+  },
+  "channels": [
+      // Array of audio channels that should be included when signing the video
+      0,
+  ],
+  "credential": {
+    // If the credential already has been defined, we can simple refer to its ID number
+    // defined in its definition
 
-      "id": "http://example.edu/credentials/1872", // The ID specified when defining a credential
-    } | {
-      "@context": [
-        "https://www.w3.org/2018/credentials/v1",
-        "https://www.w3.org/2018/credentials/examples/v1"
-      ],
-      "id": "http://example.edu/credentials/1872",
-      "type": ["VerifiableCredential", "AlumniCredential"],
-      "issuer": "https://example.edu/issuers/565049",
-      "issuanceDate": "2010-01-01T19:23:24Z",
-      "credentialSubject": {
-        "id": "did:example:ebfeb1f712ebc6f1c276e12ec21",
-        "alumniOf": {
-          "id": "did:example:c276e12ec21ebfeb1f712ebc6f1",
-          "name": [{
-            "value": "Example University",
-            "lang": "en"
-          }, {
-            "value": "Exemple d'Université",
-            "lang": "fr"
-          }]
-        }
-      },
-      "proof": {
-        "type": "RsaSignature2018",
-        "created": "2017-06-18T21:19:10Z",
-        "proofPurpose": "assertionMethod",
-        "verificationMethod": "https://example.edu/issuers/565049#key-1",
-        "jws": "eyJhbGciOiJSUzI1NiIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..TCYt5X
-          sITJX1CxPCT8yAV-TVkIEq_PbChOMqsLfRoPsnsgw5WEuts01mq-pQy7UJiN5mgRxD-WUc
-          X16dUEMGlv50aqzpqh4Qktb3rk-BuQy72IFLOqV0G_zS245-kronKb78cPN25DGlcTwLtj
-          PAYuNzVBAh4vGHSrQyHUdBBPM"
+    "id": "http://example.edu/credentials/1872", // The ID specified when defining a credential
+  } | {
+    "@context": [
+      "https://www.w3.org/2018/credentials/v1",
+      "https://www.w3.org/2018/credentials/examples/v1"
+    ],
+    "id": "http://example.edu/credentials/1872",
+    "type": ["VerifiableCredential", "AlumniCredential"],
+    "issuer": "https://example.edu/issuers/565049",
+    "issuanceDate": "2010-01-01T19:23:24Z",
+    "credentialSubject": {
+      "id": "did:example:ebfeb1f712ebc6f1c276e12ec21",
+      "alumniOf": {
+        "id": "did:example:c276e12ec21ebfeb1f712ebc6f1",
+        "name": [{
+          "value": "Example University",
+          "lang": "en"
+        }, {
+          "value": "Exemple d'Université",
+          "lang": "fr"
+        }]
       }
     },
-    // TODO: Look into if the signature should have more information
-    "signature": "..." // The signature itself in Base64
-  }
-]
+    "proof": {
+      "type": "RsaSignature2018",
+      "created": "2017-06-18T21:19:10Z",
+      "proofPurpose": "assertionMethod",
+      "verificationMethod": "https://example.edu/issuers/565049#key-1",
+      "jws": "eyJhbGciOiJSUzI1NiIsImI2NCI6ZmFsc2UsImNyaXQiOlsiYjY0Il19..TCYt5X
+        sITJX1CxPCT8yAV-TVkIEq_PbChOMqsLfRoPsnsgw5WEuts01mq-pQy7UJiN5mgRxD-WUc
+        X16dUEMGlv50aqzpqh4Qktb3rk-BuQy72IFLOqV0G_zS245-kronKb78cPN25DGlcTwLtj
+        PAYuNzVBAh4vGHSrQyHUdBBPM"
+    }
+  },
+  // TODO: Look into if the signature should have more information
+  "signature": "..." // The signature itself in Base64
+}
 ```
 
 You will notice `credential` has multiple variations, one to reference a
