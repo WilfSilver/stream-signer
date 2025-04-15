@@ -98,18 +98,29 @@ pub struct ChunkSigner<S: Signer> {
 
     /// If this is set, we will only return a reference of the definition
     pub is_ref: bool,
+
+    /// The audio channels to include when signing, in the order that they will
+    /// be added to the buffer to be signed. If [None] is given, then it assumes
+    /// all buffers should be included
+    pub channels: Option<Vec<usize>>,
 }
 
 impl<S: Signer> ChunkSigner<S> {
     /// Creates a new object, with pos and size set to None (assuming they
     /// will be defined later with [Self::with_embedding])
-    pub fn new(start: Timestamp, signer: Arc<S>, is_ref: bool) -> Self {
+    pub fn new(
+        start: Timestamp,
+        signer: Arc<S>,
+        channels: Option<Vec<usize>>,
+        is_ref: bool,
+    ) -> Self {
         Self {
             signer,
             pos: None,
             size: None,
             start,
             is_ref,
+            channels,
         }
     }
 
@@ -127,6 +138,7 @@ impl<S: Signer> ChunkSigner<S> {
         self,
         msg: Vec<u8>,
         size: Vec2u,
+        channels: usize,
     ) -> Result<ChunkSignature, JwkStorageDocumentError> {
         let presentation: PresentationOrId = if self.is_ref {
             PresentationOrId::new_ref(self.signer.get_presentation_id())
@@ -140,6 +152,7 @@ impl<S: Signer> ChunkSigner<S> {
         Ok(ChunkSignature {
             pos: self.pos.unwrap_or_default(),
             size: self.size.unwrap_or(size),
+            channels: self.channels.unwrap_or((0..channels).collect::<Vec<_>>()),
             presentation,
             signature,
         })
@@ -150,6 +163,7 @@ impl<S: Signer> Clone for ChunkSigner<S> {
     fn clone(&self) -> Self {
         Self {
             signer: self.signer.clone(),
+            channels: self.channels.clone(),
             pos: self.pos,
             size: self.size,
             start: self.start,

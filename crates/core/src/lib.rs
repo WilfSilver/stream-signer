@@ -1,3 +1,4 @@
+pub mod audio;
 pub mod file;
 pub mod spec;
 pub mod utils;

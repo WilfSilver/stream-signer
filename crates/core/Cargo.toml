@@ -14,10 +14,11 @@ withtestlibs = ["testlibs"]
 [dependencies]
 base64 = "0.22.1"
 futures = "0.3.31"
-glib = "0.20.7"
-gst = { package = "gstreamer", version = "0.23.4" }
-gst-app = { package = "gstreamer-app", version = "0.23.4" }
-gst-video = { package = "gstreamer-video", version = "0.23.4" }
+glib = "0.20.9"
+gst = { package = "gstreamer", version = "0.23.5" }
+gst-app = { package = "gstreamer-app", version = "0.23.5" }
+gst-video = { package = "gstreamer-video", version = "0.23.5" }
+gst-audio = { package = "gstreamer-audio", version = "0.23.5" }
 identity_eddsa_verifier = "1.5.0"
 identity_iota = "1.5.0"
 image = { version = "0.25", default-features = false }

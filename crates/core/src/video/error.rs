@@ -64,6 +64,8 @@ pub enum SigOperationError {
     InvalidChunkSize(usize),
     #[error("Could not crop frame with pos {0:?} and size {1:?}")]
     InvalidCrop(Vec2u, Vec2u),
+    #[error("The given channels do not exists {0:?}")]
+    InvalidChannels(Vec<usize>),
     #[cfg(feature = "verifying")]
     #[error(transparent)]
     UnknownCredential(#[from] UnknownKey),

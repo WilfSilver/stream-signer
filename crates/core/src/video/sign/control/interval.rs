@@ -88,6 +88,7 @@ impl<S: Signer + 'static> SingleController<S> for IntervalController<S> {
                 let mut res = ChunkSigner::new(
                     state.time.start() - self.interval,
                     self.signer.clone(),
+                    None,
                     !self.is_start.load(Ordering::Relaxed),
                 );
 

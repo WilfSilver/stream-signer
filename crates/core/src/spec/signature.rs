@@ -14,6 +14,8 @@ pub struct ChunkSignature {
     pub pos: Vec2u,
     /// The pixel width and height of the area which is signed
     pub size: Vec2u,
+    /// The audio channels to be included when signing
+    pub channels: Vec<usize>,
     /// Reference to or the definition of a verified credential (id field is
     /// required).
     pub presentation: PresentationOrId,

@@ -81,6 +81,7 @@ mod verifying {
                     .1
                     .as_ref()
                     .map_err(|e| e.clone())?
+                    .frame
                     .fps()
                     .convert_to_frames(MAX_CHUNK_LENGTH),
                 None => 0,
@@ -142,11 +143,12 @@ mod signing {
     use crate::{
         file::SignedInterval,
         video::{
+            frame::FrameWithAudio,
             sign::{
                 AsyncFnMutController, Controller, FnMutController, MultiController,
                 SingleController,
             },
-            Frame, FrameState, SigningError,
+            FrameState, SigningError,
         },
     };
 
@@ -254,12 +256,13 @@ mod signing {
                      .1
                     .as_ref()
                     .map_err(|e| e.clone())?
+                    .frame
                     .fps()
                     .convert_to_frames(MAX_CHUNK_LENGTH),
                 None => 0,
             };
 
-            let mut buf: VecDeque<Frame> = VecDeque::new();
+            let mut buf: VecDeque<FrameWithAudio> = VecDeque::new();
             buf.reserve_exact(buf_capacity);
             let frame_buffer = Arc::new(Mutex::new(buf));
 
