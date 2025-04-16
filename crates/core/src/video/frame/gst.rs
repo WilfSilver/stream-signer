@@ -21,7 +21,7 @@ impl FrameWithAudio {
     ///
     /// It will also do the checking if the given crop is within the bounds of
     /// the image, if it is not it will return a [SigOperationError::InvalidCrop] or
-    /// [SigOperationError::InvalidChannel]
+    /// [SigOperationError::InvalidChannels]
     pub fn cropped_buffer<'a>(
         &'a self,
         pos: Vec2u,

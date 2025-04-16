@@ -7,7 +7,7 @@ use super::{builder::SignPipelineBuilder, iter::FrameIter, manager::PipeInitiato
 pub const MAX_CHUNK_LENGTH: usize = 10 * ONE_SECOND_MILLIS as usize;
 pub const MIN_CHUNK_LENGTH: usize = 50;
 
-/// This is a wrapper type around gstreamer's [Pipeline] providing functions to
+/// This is a wrapper type around gstreamer's [gst::Pipeline] providing functions to
 /// sign and verify a stream.
 #[derive(Debug)]
 pub struct SignPipeline {
