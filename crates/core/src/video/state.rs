@@ -12,7 +12,7 @@ use crate::video::Frame;
 /// An interface to make it easier interacting with the [Frame] and other
 /// aspects of the video (without having the bloated contexts)
 ///
-/// Note this is slightly different to [crate::video::manager::FrameState], as
+/// Note this is slightly different to [crate::video::manager::FrameManager], as
 /// that is more focused on being a nice interface to interact with (and also
 /// we don't need the specific context for this frame)
 #[derive(Debug, Clone)]

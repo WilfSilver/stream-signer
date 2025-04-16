@@ -36,7 +36,7 @@ pub struct FrameIter<VC> {
     /// Whether the last frame has been returned
     pub fused: bool,
 
-    /// Caches all the audio so it create an [AudioFrame]
+    /// Caches all the audio so it create an [crate::audio::AudioFrame]
     pub audio_buffer: AudioBuffer,
 }
 

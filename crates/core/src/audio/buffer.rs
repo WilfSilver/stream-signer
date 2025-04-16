@@ -7,7 +7,7 @@ use crate::video::Framerate;
 
 use super::AudioFrame;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct AudioBuffer {
     pub buffer: VecDeque<Buffer>,
     info: Option<AudioInfo>,
@@ -119,18 +119,6 @@ impl From<gst::Sample> for AudioBuffer {
             rel_start_ns: 0,
             buffer: VecDeque::from_iter([buffer]),
             info,
-        }
-    }
-}
-
-impl Default for AudioBuffer {
-    fn default() -> Self {
-        Self {
-            buffer: VecDeque::default(),
-            // Temporary information to be changed later on
-            info: None,
-            start_idx: 0,
-            rel_start_ns: 0,
         }
     }
 }
