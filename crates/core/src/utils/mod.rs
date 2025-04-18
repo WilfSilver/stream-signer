@@ -1,3 +1,7 @@
+//! Simple abstractions to help with key elements of the logic throughout the
+//! library, note most of these are behind features, which are activated
+//! depending on if they are required by verifying or signing process
+
 #[cfg(feature = "credential_store")]
 mod credential;
 
