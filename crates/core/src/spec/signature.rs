@@ -7,6 +7,9 @@ type Signature = Vec<u8>;
 
 /// Information stored about the signature of a video/embedding for a given
 /// time range in a the video
+///
+/// Within the specification, this is what is stored for each time range within
+/// an `srt` file.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ChunkSignature {
     /// The pixel Vec2uinate of the top left hand corner where the embedding
@@ -27,6 +30,7 @@ pub struct ChunkSignature {
     pub signature: Signature,
 }
 
+/// Serialises the Signature to Base64
 fn signature_serialise<S>(x: &Signature, s: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
@@ -35,6 +39,7 @@ where
     s.serialize_str(&encoded)
 }
 
+/// Decodes the Base64 string as a [Signature]
 fn from_signature<'de, D>(deserializer: D) -> Result<Signature, D::Error>
 where
     D: Deserializer<'de>,
