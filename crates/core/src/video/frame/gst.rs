@@ -5,14 +5,14 @@ use gst_video::VideoFrameExt;
 
 pub use image::GenericImageView;
 
-use crate::{audio::AudioFrame, spec::Vec2u, video::SigOperationError};
+use crate::{audio::AudioSlice, spec::Vec2u, video::SigOperationError};
 
 use super::{Framerate, ImageFns};
 
 #[derive(Debug, Clone)]
 pub struct FrameWithAudio {
     pub frame: Frame,
-    pub audio: Option<AudioFrame>,
+    pub audio: Option<AudioSlice>,
 }
 
 impl FrameWithAudio {

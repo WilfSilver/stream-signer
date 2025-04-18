@@ -341,7 +341,7 @@ pub mod sign {
     use identity_iota::storage::JwkStorageDocumentError;
 
     use crate::{
-        audio::AudioFrame,
+        audio::AudioSlice,
         file::SignedInterval,
         video::{sign::Controller, ChunkSigner, Signer, SigningError, StreamError},
     };
@@ -490,7 +490,7 @@ pub mod sign {
                 .raw
                 .audio
                 .as_ref()
-                .map(AudioFrame::channels)
+                .map(AudioSlice::channels)
                 .unwrap_or_default();
 
             Ok(signer
