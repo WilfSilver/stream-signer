@@ -1,13 +1,12 @@
 //! This contains the different structures that we may want to store about a
 //! frame.
 
-use crate::video::Pipeline;
+use crate::{
+    utils::TimeRange,
+    video::{audio::AudioSlice, manager::SrcInfo, Pipeline},
+};
 
-use crate::audio::AudioSlice;
-use crate::utils::TimeRange;
-
-use crate::video::manager::SrcInfo;
-use crate::video::Frame;
+use super::Frame;
 
 /// An interface to make it easier interacting with the [Frame] and other
 /// aspects of the video (without having the bloated contexts)

@@ -28,7 +28,6 @@
 //! work as a valid and more relaxed alternative to watermarking and concepts
 //! like [JPEG Trust](https://jpeg.org/jpegtrust/index.html) or [C2PA](https://c2pa.org/)
 
-pub mod audio;
 pub mod file;
 pub mod spec;
 pub mod utils;
