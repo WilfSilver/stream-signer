@@ -66,7 +66,12 @@ impl Controller<TestIdentity> for SignController {
             let next_frame_time = *(time.start() - *last_sign) as f64 + time.frame_duration();
             if self.sign_ctrl.load(Ordering::Relaxed) || next_frame_time >= MAX_CHUNK_LENGTH as f64
             {
-                let res = ChunkSigner::new(*last_sign, self.signer.clone(), *last_sign != 0.into());
+                let res = ChunkSigner::new(
+                    *last_sign,
+                    self.signer.clone(),
+                    None,
+                    *last_sign != 0.into(),
+                );
 
                 self.sign_ctrl.store(false, Ordering::Relaxed);
                 *last_sign = time.start();

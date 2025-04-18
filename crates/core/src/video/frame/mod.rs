@@ -4,7 +4,9 @@
 mod gst;
 mod image;
 mod rate;
+mod state;
 
 pub use gst::*;
 pub use image::*;
 pub use rate::*;
+pub use state::*;

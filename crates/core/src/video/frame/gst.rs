@@ -5,9 +5,36 @@ use gst_video::VideoFrameExt;
 
 pub use image::GenericImageView;
 
-use crate::{spec::Vec2u, video::SigOperationError};
+use crate::{audio::AudioFrame, spec::Vec2u, video::SigOperationError};
 
 use super::{Framerate, ImageFns};
+
+#[derive(Debug, Clone)]
+pub struct FrameWithAudio {
+    pub frame: Frame,
+    pub audio: Option<AudioFrame>,
+}
+
+impl FrameWithAudio {
+    /// This returns the bytes that should be signed, including the audio
+    /// channels
+    ///
+    /// It will also do the checking if the given crop is within the bounds of
+    /// the image, if it is not it will return a [SigOperationError::InvalidCrop] or
+    /// [SigOperationError::InvalidChannels]
+    pub fn cropped_buffer<'a>(
+        &'a self,
+        pos: Vec2u,
+        size: Vec2u,
+        channels: &'a Option<Vec<usize>>,
+    ) -> Result<Box<dyn Iterator<Item = u8> + 'a>, SigOperationError> {
+        let frame = self.frame.cropped_buffer(pos, size)?;
+        Ok(match &self.audio {
+            Some(audio) => Box::new(frame.chain(audio.cropped_buffer(channels)?)),
+            None => Box::new(frame),
+        })
+    }
+}
 
 #[derive(Debug)]
 pub struct Frame(gst_video::VideoFrame<gst_video::video_frame::Readable>);
@@ -48,6 +75,21 @@ impl Frame {
             .cloned();
 
         Ok(it)
+    }
+
+    /// Returns the number of nanoseconds this frame should appear at
+    pub fn get_timestamp(&self) -> u64 {
+        let timestamp = self.0.buffer().pts().unwrap_or_default();
+        timestamp.nseconds()
+    }
+
+    /// Returns the number of nanoseconds this frame should stop appearing
+    /// at (i.e. the next frame)
+    pub fn get_end_timestamp(&self) -> u64 {
+        let timestamp = self.0.buffer().pts().unwrap_or_default();
+        let fps: Framerate<f64> = self.fps().into();
+        let length = fps.convert_to_ms(1) * 1000000.; // Millisecond to nanosecond
+        timestamp.nseconds() + length as u64
     }
 
     /// Returns the raw slice of bytes of the [Frame].

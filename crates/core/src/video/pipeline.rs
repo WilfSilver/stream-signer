@@ -7,7 +7,7 @@ use super::{builder::SignPipelineBuilder, iter::FrameIter, manager::PipeInitiato
 pub const MAX_CHUNK_LENGTH: usize = 10 * ONE_SECOND_MILLIS as usize;
 pub const MIN_CHUNK_LENGTH: usize = 50;
 
-/// This is a wrapper type around gstreamer's [Pipeline] providing functions to
+/// This is a wrapper type around gstreamer's [gst::Pipeline] providing functions to
 /// sign and verify a stream.
 #[derive(Debug)]
 pub struct SignPipeline {
@@ -81,6 +81,7 @@ mod verifying {
                     .1
                     .as_ref()
                     .map_err(|e| e.clone())?
+                    .frame
                     .fps()
                     .convert_to_frames(MAX_CHUNK_LENGTH),
                 None => 0,
@@ -142,11 +143,12 @@ mod signing {
     use crate::{
         file::SignedInterval,
         video::{
+            frame::FrameWithAudio,
             sign::{
                 AsyncFnMutController, Controller, FnMutController, MultiController,
                 SingleController,
             },
-            Frame, FrameState, SigningError,
+            FrameState, SigningError,
         },
     };
 
@@ -254,12 +256,13 @@ mod signing {
                      .1
                     .as_ref()
                     .map_err(|e| e.clone())?
+                    .frame
                     .fps()
                     .convert_to_frames(MAX_CHUNK_LENGTH),
                 None => 0,
             };
 
-            let mut buf: VecDeque<Frame> = VecDeque::new();
+            let mut buf: VecDeque<FrameWithAudio> = VecDeque::new();
             buf.reserve_exact(buf_capacity);
             let frame_buffer = Arc::new(Mutex::new(buf));
 
@@ -424,7 +427,7 @@ mod signing {
         ///   // ...
         ///   if !info.time.is_start() && info.time.multiple_of(100) {
         ///     let res = vec![
-        ///       ChunkSigner::new(info.time.start() - 100, signer.clone(), is_first),
+        ///       ChunkSigner::new(info.time.start() - 100, signer.clone(), None, is_first),
         ///     ];
         ///     is_first = false;
         ///     res
@@ -1231,7 +1234,6 @@ mod tests {
     async fn verify_with_invalid_chunk_length() -> Result<(), Box<dyn Error>> {
         gst::init()?;
 
-        // TODO: This is like really slow
         let client = get_client();
         let issuer = TestIssuer::new(client.clone()).await?;
         let resolver = get_resolver(client);
@@ -1309,7 +1311,7 @@ mod tests {
                 })
                 .await;
 
-            assert!(count > 0, "We verified some chunks");
+            assert!(count > 0, "We verified some chunks"); // TODO: Change back
         }
 
         Ok(())
