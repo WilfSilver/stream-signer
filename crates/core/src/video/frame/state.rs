@@ -3,7 +3,7 @@
 
 use crate::video::Pipeline;
 
-use crate::audio::AudioFrame;
+use crate::audio::AudioSlice;
 use crate::utils::TimeRange;
 
 use crate::video::manager::SrcInfo;
@@ -28,7 +28,7 @@ pub struct FrameState {
     /// [Frame::clone] does not clone the underlying object
     pub frame: Frame,
 
-    pub audio: Option<AudioFrame>,
+    pub audio: Option<AudioSlice>,
 
     /// The range of time that this frame is likely to be visible. For more
     /// information see [TimeRange]
