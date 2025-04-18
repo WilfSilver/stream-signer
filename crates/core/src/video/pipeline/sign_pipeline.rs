@@ -141,12 +141,17 @@ mod signing {
     use tokio_stream::wrappers::UnboundedReceiverStream;
 
     use crate::{
-        file::SignedInterval, spec::MAX_CHUNK_LENGTH, video::{
+        file::SignedInterval,
+        spec::MAX_CHUNK_LENGTH,
+        video::{
             frame::FrameWithAudio,
             manager::sign,
-            sign::{AsyncFnMutController, ChunkSigner, Controller, FnMutController, MultiController, SingleController},
+            sign::{
+                AsyncFnMutController, ChunkSigner, Controller, FnMutController, MultiController,
+                SingleController,
+            },
             FrameState, Signer, SigningError,
-        }
+        },
     };
 
     use self::sign::SigningContext;
