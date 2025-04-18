@@ -23,7 +23,7 @@ use identity_iota::{
 };
 use serde_json::json;
 use stream_signer::{
-    file::Timestamp, gst, video::builder::FramerateOption, SignFile, SignPipeline,
+    file::Timestamp, gst, video::pipeline::FramerateOption, SignFile, SignPipeline,
 };
 use testlibs::{client::get_client, identity::TestIdentity, issuer::TestIssuer};
 

@@ -1,3 +1,5 @@
+//! This stores the builder for [SignPipeline]
+//!
 //! Parts of this file is inspired by [vid_frame_iter](https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter)
 
 use std::{path::Path, sync::Arc};
@@ -15,7 +17,7 @@ use tokio::sync::Mutex;
 
 use crate::{file::Timestamp, video::manager::SrcInfo};
 
-use super::{manager::PipeInitiator, SignPipeline};
+use crate::video::{manager::PipeInitiator, SignPipeline};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub enum FramerateOption {
@@ -27,7 +29,10 @@ pub enum FramerateOption {
 pub type BuilderError = glib::BoolError;
 
 /// Enables building, signing and verifying videos
+///
+/// For examples, please see [SignPipeline]
 pub struct SignPipelineBuilder<'a> {
+    /// The source element, which is by default a `uridecodebin`
     pub src: ElementBuilder<'a>,
 
     pub video_convert: ElementBuilder<'a>,
@@ -92,6 +97,7 @@ impl SignPipelineBuilder<'_> {
     }
 
     /// Change the frame rate of the iterator. The argument is a fraction, for example:
+    ///
     /// * For a framerate of one per 3 seconds, use (1, 3).
     /// * For a framerate of 12.34 frames per second use (1234 / 100).
     pub fn with_frame_rate(mut self, fps: FramerateOption) -> Self {
@@ -120,12 +126,13 @@ impl SignPipelineBuilder<'_> {
         self
     }
 
-    /// Sets the appsink name
+    /// Sets the appsink name for the video sink, by default it is `video_sink`
     pub fn with_video_sink_name<S: ToString>(mut self, sink_name: S) -> Self {
         self.video_sink = self.video_sink.name(sink_name.to_string());
         self
     }
 
+    /// Sets the appsink name for the audio sink, by default it is `audio_sink`
     pub fn with_audio_sink_name<S: ToString>(mut self, sink_name: S) -> Self {
         self.video_sink = self.video_sink.name(sink_name.to_string());
         self

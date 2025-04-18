@@ -1,19 +1,18 @@
-//! This provides an easy interface to iterate over the [Frame]s in a pipeline
-//! with a state stored throughout
+//! This provides an easy interface to iterate over the [FrameWithAudio]s in a
+//! pipeline with a state stored throughout
 //!
-//! This basically a cut down version of [vid_frame_iter](https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter)
+//! This basically a heavily modified version of [vid_frame_iter](https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter)
 
 use std::{iter::FusedIterator, sync::Arc};
 
 use gst::{CoreError, MessageView, Sample};
 use gst_app::AppSink;
 
-use crate::audio::AudioBuffer;
-
 use super::{
+    audio::AudioBuffer,
     frame::FrameWithAudio,
-    gst::into_glib_error,
     manager::{PipeInitiator, PipeState},
+    utils::into_glib_error,
     Frame,
 };
 
@@ -36,7 +35,7 @@ pub struct FrameIter<VC> {
     /// Whether the last frame has been returned
     pub fused: bool,
 
-    /// Caches all the audio so it create an [crate::audio::AudioFrame]
+    /// Caches all the audio so it create an [super::audio::AudioSlice]
     pub audio_buffer: AudioBuffer,
 }
 
