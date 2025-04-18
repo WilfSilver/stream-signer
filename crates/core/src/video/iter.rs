@@ -47,7 +47,7 @@ impl<VC> FrameIter<VC> {
         let state = PipeState::new(init, context)?;
         Ok(Self {
             state: Arc::new(state),
-            timeout: 30 * gst::ClockTime::SECOND,
+            timeout: gst::ClockTime::SECOND,
             fused: false,
             audio_buffer: AudioBuffer::default(),
         })
@@ -151,13 +151,15 @@ impl<VC> Iterator for FrameIter<VC> {
                 let end_timestamp = frame.get_end_timestamp();
                 // TODO: use sink.is_eos() to pass down if last frame
 
-                if !audio_sink.is_eos() {
-                    while self.audio_buffer.get_end_timestamp() < end_timestamp {
-                        let sample = self.get_sample_for(&audio_sink);
-                        match sample {
-                            Some(Ok(sample)) => self.audio_buffer.add_sample(sample),
-                            Some(Err(e)) => return Some(Err(e)),
-                            None => return None,
+                if let Some(audio_sink) = audio_sink {
+                    if !audio_sink.is_eos() {
+                        while self.audio_buffer.get_end_timestamp() < end_timestamp {
+                            let sample = self.get_sample_for(&audio_sink);
+                            match sample {
+                                Some(Ok(sample)) => self.audio_buffer.add_sample(sample),
+                                Some(Err(e)) => return Some(Err(e)),
+                                None => return None,
+                            }
                         }
                     }
                 }
@@ -165,7 +167,7 @@ impl<VC> Iterator for FrameIter<VC> {
                 let fps = frame.fps();
                 Some(Ok(FrameWithAudio {
                     frame,
-                    audio: self.audio_buffer.pop_next_frame(fps).unwrap_or_default(),
+                    audio: self.audio_buffer.pop_next_frame(fps),
                 }))
             }
             Some(Err(e)) => Some(Err(e)),
