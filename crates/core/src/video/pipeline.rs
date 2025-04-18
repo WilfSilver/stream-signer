@@ -427,7 +427,7 @@ mod signing {
         ///   // ...
         ///   if !info.time.is_start() && info.time.multiple_of(100) {
         ///     let res = vec![
-        ///       ChunkSigner::new(info.time.start() - 100, signer.clone(), is_first),
+        ///       ChunkSigner::new(info.time.start() - 100, signer.clone(), None, is_first),
         ///     ];
         ///     is_first = false;
         ///     res
@@ -1234,7 +1234,6 @@ mod tests {
     async fn verify_with_invalid_chunk_length() -> Result<(), Box<dyn Error>> {
         gst::init()?;
 
-        // TODO: This is like really slow
         let client = get_client();
         let issuer = TestIssuer::new(client.clone()).await?;
         let resolver = get_resolver(client);
@@ -1312,7 +1311,7 @@ mod tests {
                 })
                 .await;
 
-            assert!(count > 0, "We verified some chunks");
+            assert!(count > 0, "We verified some chunks"); // TODO: Change back
         }
 
         Ok(())

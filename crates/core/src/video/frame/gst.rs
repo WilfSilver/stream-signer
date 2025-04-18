@@ -12,7 +12,7 @@ use super::{Framerate, ImageFns};
 #[derive(Debug, Clone)]
 pub struct FrameWithAudio {
     pub frame: Frame,
-    pub audio: AudioFrame,
+    pub audio: Option<AudioFrame>,
 }
 
 impl FrameWithAudio {
@@ -27,9 +27,12 @@ impl FrameWithAudio {
         pos: Vec2u,
         size: Vec2u,
         channels: &'a Option<Vec<usize>>,
-    ) -> Result<impl Iterator<Item = u8> + 'a, SigOperationError> {
+    ) -> Result<Box<dyn Iterator<Item = u8> + 'a>, SigOperationError> {
         let frame = self.frame.cropped_buffer(pos, size)?;
-        Ok(frame.chain(self.audio.cropped_buffer(channels)?))
+        Ok(match &self.audio {
+            Some(audio) => Box::new(frame.chain(audio.cropped_buffer(channels)?)),
+            None => Box::new(frame),
+        })
     }
 }
 

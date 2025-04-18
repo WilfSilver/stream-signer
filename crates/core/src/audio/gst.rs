@@ -89,16 +89,3 @@ impl AudioFrame {
         })
     }
 }
-
-impl Default for AudioFrame {
-    fn default() -> Self {
-        Self {
-            buffers: Vec::default(),
-            info: AudioInfo::builder(gst_audio::AudioFormat::F32le, 1, 2)
-                .build()
-                .expect("Failed to build audio info"),
-            start: 0,
-            end: 0,
-        }
-    }
-}

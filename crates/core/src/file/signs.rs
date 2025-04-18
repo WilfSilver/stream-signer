@@ -118,6 +118,7 @@ impl<'a> From<SignedChunk<'a>> for SignedInterval {
 /// let signature_info = ChunkSignature {
 ///      pos: Vec2u::new(0, 0),
 ///      size: Vec2u::new(1920, 1080),
+///      channels: vec![1, 2],
 ///      presentation: PresentationOrId::new_ref("my_presentation_id"),
 ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
 /// };
@@ -191,6 +192,7 @@ impl SignFile {
     /// let signature_info = ChunkSignature {
     ///      pos: Vec2u::new(0, 0),
     ///      size: Vec2u::new(1920, 1080),
+    ///      channels: vec![1, 2],
     ///      presentation: PresentationOrId::new_ref("my_presentation_id"),
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };
@@ -246,6 +248,7 @@ impl SignFile {
     /// let signature_info = ChunkSignature {
     ///      pos: Vec2u::new(0, 0),
     ///      size: Vec2u::new(1920, 1080),
+    ///      channels: vec![1, 2],
     ///      presentation: PresentationOrId::new_ref("my_presentation_id"),
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };
@@ -295,6 +298,7 @@ impl Extend<SignedInterval> for SignFile {
     /// let first_signature = ChunkSignature {
     ///      pos: Vec2u::new(0, 0),
     ///      size: Vec2u::new(1920, 1080),
+    ///      channels: vec![1, 2],
     ///      presentation: PresentationOrId::new_ref("my_presentation_id"),
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };
@@ -302,6 +306,7 @@ impl Extend<SignedInterval> for SignFile {
     /// let second_signature = ChunkSignature {
     ///      pos: Vec2u::new(0, 0),
     ///      size: Vec2u::new(1920, 1080),
+    ///      channels: vec![1, 2],
     ///      presentation: PresentationOrId::new_ref("my_presentation_id"),
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };

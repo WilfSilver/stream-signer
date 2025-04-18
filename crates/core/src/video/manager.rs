@@ -232,20 +232,22 @@ impl<VC> PipeState<VC> {
         self.pipe
             .raw()
             .by_name(&self.video_sink)
-            .expect("Sink element not found")
+            .expect("Video element not found")
             .downcast::<gst_app::AppSink>()
             .expect("Sink element is expected to be an appsink!")
     }
 
     /// Returns an [AppSink] from the stored information about the sink.
     /// This is assumed to never fail, relying on the setup to be correct
-    pub fn get_audio_sink(&self) -> AppSink {
+    ///
+    /// Unlike the video sink, we don't always assume the audio sink will
+    /// exist as it is only added when needed
+    pub fn get_audio_sink(&self) -> Option<AppSink> {
         self.pipe
             .raw()
             .by_name(&self.audio_sink)
-            .expect("Sink element not found")
-            .downcast::<gst_app::AppSink>()
-            .expect("Sink element is expected to be an appsink!")
+            .map(Cast::downcast::<gst_app::AppSink>)
+            .map(|e| e.expect("Sink element is expected to be an appsink!"))
     }
 
     /// Returns a [gst::Bus] for the current pipeline
@@ -339,6 +341,7 @@ pub mod sign {
     use identity_iota::storage::JwkStorageDocumentError;
 
     use crate::{
+        audio::AudioFrame,
         file::SignedInterval,
         video::{sign::Controller, ChunkSigner, Signer, SigningError, StreamError},
     };
@@ -483,8 +486,15 @@ pub mod sign {
             let start = signer.start;
             let end = self.timestamp;
 
+            let channels = self
+                .raw
+                .audio
+                .as_ref()
+                .map(AudioFrame::channels)
+                .unwrap_or_default();
+
             Ok(signer
-                .sign(buf, default_size, self.raw.audio.channels())
+                .sign(buf, default_size, channels)
                 .and_then(move |res| async move { Ok(SignedInterval::new(start, end, res)) }))
         }
     }

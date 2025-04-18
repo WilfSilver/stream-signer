@@ -68,9 +68,10 @@ impl SignPipelineBuilder<'_> {
             video_caps: gst_video::VideoCapsBuilder::new().format(gst_video::VideoFormat::Rgb),
 
             audio_convert: ElementFactory::make("audioconvert"),
-            audio_sink: AppSink::builder().name("audio_sink"),
-            // .sync(false)
-            // .drop(false),
+            audio_sink: AppSink::builder()
+                .name("audio_sink")
+                .sync(false)
+                .drop(false),
             audio_caps: gst_audio::AudioCapsBuilder::new().format(gst_audio::AudioFormat::F32le),
 
             start_offset: None,
@@ -156,14 +157,13 @@ impl SignPipelineBuilder<'_> {
         let audio_sink = self.audio_sink.caps(&self.audio_caps.build()).build();
         let audio_sink_name = audio_sink.name().to_string();
 
-        pipe.add_many([&audio_convert, audio_sink.upcast_ref()])?;
-        audio_convert.link(&audio_sink)?;
-
         // DYNAMIC LINKING
 
         let src_info = Arc::new(Mutex::new(None));
         let si = src_info.clone();
+
         // Connect the 'pad-added' signal to dynamically link the source to the converter
+        let pipe_clone = pipe.clone();
         src.connect_pad_added(move |src, src_pad| {
             let caps = src_pad.current_caps().expect("Could not get CAPS");
             let name = caps
@@ -172,6 +172,19 @@ impl SignPipelineBuilder<'_> {
                 .name();
 
             if name.starts_with("audio/") {
+                // We only want to add audio components when they are necessary
+                // (e.g. audio exists in the video format)
+                pipe_clone
+                    .add_many([&audio_convert, audio_sink.upcast_ref()])
+                    .expect("Couldn't add audioconvert and audiosink");
+
+                audio_convert
+                    .link(&audio_sink)
+                    .expect("Couldn't link audioconvert to audiosink");
+
+                audio_convert.sync_state_with_parent().unwrap();
+                audio_sink.sync_state_with_parent().unwrap();
+
                 let sink_pad = audio_convert
                     .static_pad("sink")
                     .expect("audioconvert should have a pad");

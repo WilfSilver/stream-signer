@@ -1,7 +1,7 @@
 //! This contains the different structures that we may want to store about a
 //! frame.
 
-use super::Pipeline;
+use crate::video::Pipeline;
 
 use crate::audio::AudioFrame;
 use crate::utils::TimeRange;
@@ -28,7 +28,7 @@ pub struct FrameState {
     /// [Frame::clone] does not clone the underlying object
     pub frame: Frame,
 
-    pub audio: AudioFrame,
+    pub audio: Option<AudioFrame>,
 
     /// The range of time that this frame is likely to be visible. For more
     /// information see [TimeRange]
