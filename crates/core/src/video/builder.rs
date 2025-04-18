@@ -3,12 +3,14 @@
 use std::{path::Path, sync::Arc};
 
 use futures::executor;
-use glib::object::ObjectExt;
+use glib::object::Cast;
 use gst::{
+    caps,
     element_factory::ElementBuilder,
-    prelude::{ElementExt, ElementExtManual, GstBinExtManual, PadExt},
-    Element, ElementFactory,
+    prelude::{ElementExt, ElementExtManual, GstBinExtManual, GstObjectExt, PadExt},
+    ElementFactory,
 };
+use gst_app::{app_sink::AppSinkBuilder, AppSink};
 use tokio::sync::Mutex;
 
 use crate::{file::Timestamp, video::manager::SrcInfo};
@@ -27,9 +29,15 @@ pub type BuilderError = glib::BoolError;
 /// Enables building, signing and verifying videos
 pub struct SignPipelineBuilder<'a> {
     pub src: ElementBuilder<'a>,
-    pub convert: ElementBuilder<'a>,
-    pub sink: ElementBuilder<'a>,
-    pub extras: Result<Vec<Element>, glib::BoolError>,
+
+    pub video_convert: ElementBuilder<'a>,
+    pub video_sink: AppSinkBuilder,
+    pub video_caps: gst_video::VideoCapsBuilder<caps::NoFeature>,
+
+    pub audio_convert: ElementBuilder<'a>,
+    pub audio_sink: AppSinkBuilder,
+    pub audio_caps: gst_audio::AudioCapsBuilder<caps::NoFeature>,
+
     start_offset: Option<f64>,
 }
 
@@ -50,14 +58,22 @@ impl SignPipelineBuilder<'_> {
             src: ElementFactory::make("uridecodebin")
                 .property("uri", uri.to_string())
                 .property("buffer-size", 1_i32),
-            // .property("caps", caps),
-            convert: ElementFactory::make("videoconvert"),
-            sink: ElementFactory::make("appsink")
-                .property("name", "sink")
-                .property("sync", false)
-                .property("max-buffers", 1_u32)
-                .property("drop", false),
-            extras: Ok(vec![]),
+
+            video_convert: ElementFactory::make("videoconvert"),
+            video_sink: AppSink::builder()
+                .name("video_sink")
+                .sync(false)
+                .max_buffers(1_u32)
+                .drop(false),
+            video_caps: gst_video::VideoCapsBuilder::new().format(gst_video::VideoFormat::Rgb),
+
+            audio_convert: ElementFactory::make("audioconvert"),
+            audio_sink: AppSink::builder()
+                .name("audio_sink")
+                .sync(false)
+                .drop(false),
+            audio_caps: gst_audio::AudioCapsBuilder::new().format(gst_audio::AudioFormat::F32le),
+
             start_offset: None,
         }
     }
@@ -70,69 +86,8 @@ impl SignPipelineBuilder<'_> {
 
     /// Sets the buffer size for the URI we are recording
     pub fn with_max_buffers(mut self, num: u32) -> Self {
-        self.sink = self.sink.property("max-buffers", num);
-        self
-    }
-
-    /// This allows you to add another [Element] to the final gstreamer
-    /// pipeline.
-    ///
-    /// Please note there are some assumptions made and therefore you should
-    /// use this function with caution
-    pub fn with_known_extra(self, extra: Element) -> Self {
-        self.with_extra(Ok(extra))
-    }
-
-    /// Similar to [Self::with_known_extra], but just with an iterator instead
-    ///
-    /// Please note there are some assumptions made and therefore you should
-    /// use this function with caution
-    pub fn with_known_extras<I>(mut self, new_extras: I) -> Self
-    where
-        I: IntoIterator<Item = Element>,
-    {
-        if let Ok(extras) = &mut self.extras {
-            extras.extend(new_extras);
-        }
-        self
-    }
-
-    /// This allows you to add another [Element] straight after the build
-    /// process without checking the status. The status will then be checked
-    /// when building this object
-    ///
-    /// Please note there are some assumptions made and therefore you should
-    /// use this function with caution
-    pub fn with_extra(mut self, extra: Result<Element, glib::BoolError>) -> Self {
-        if let Ok(extras) = &mut self.extras {
-            match extra {
-                Ok(value) => extras.push(value),
-                Err(e) => self.extras = Err(e),
-            }
-        }
-        self
-    }
-
-    /// Similar to [Self::with_extra] but with a series of elements all of which
-    /// might have failed
-    ///
-    /// Please note there are some assumptions made and therefore you should
-    /// use this function with caution
-    pub fn with_extras<I>(mut self, extras: I) -> Self
-    where
-        I: IntoIterator<Item = Result<Element, glib::BoolError>>,
-    {
-        if let Ok(old_extras) = &mut self.extras {
-            for e in extras {
-                match e {
-                    Ok(value) => old_extras.push(value),
-                    Err(e) => {
-                        self.extras = Err(e);
-                        break;
-                    }
-                }
-            }
-        }
+        self.video_sink = self.video_sink.max_buffers(num);
+        self.audio_sink = self.audio_sink.max_buffers(num);
         self
     }
 
@@ -141,9 +96,21 @@ impl SignPipelineBuilder<'_> {
     /// * For a framerate of 12.34 frames per second use (1234 / 100).
     pub fn with_frame_rate(mut self, fps: FramerateOption) -> Self {
         match fps {
-            FramerateOption::Fastest => self.sink = self.sink.property("sync", false),
-            FramerateOption::Auto => self.sink = self.sink.property("sync", true),
+            FramerateOption::Fastest => {
+                self.video_sink = self.video_sink.sync(false);
+                self.audio_sink = self.audio_sink.sync(false);
+            }
+            FramerateOption::Auto => {
+                self.video_sink = self.video_sink.sync(true);
+                self.audio_sink = self.audio_sink.sync(true);
+            }
         }
+        self
+    }
+
+    /// Sets the number of audio channels to be expected from the format
+    pub fn with_audio_channels(mut self, channels: u32) -> Self {
+        self.audio_caps = self.audio_caps.field("channels", channels);
         self
     }
 
@@ -154,8 +121,13 @@ impl SignPipelineBuilder<'_> {
     }
 
     /// Sets the appsink name
-    pub fn with_sink_name<S: ToString>(mut self, sink_name: S) -> Self {
-        self.sink = self.sink.property("name", sink_name.to_string());
+    pub fn with_video_sink_name<S: ToString>(mut self, sink_name: S) -> Self {
+        self.video_sink = self.video_sink.name(sink_name.to_string());
+        self
+    }
+
+    pub fn with_audio_sink_name<S: ToString>(mut self, sink_name: S) -> Self {
+        self.video_sink = self.video_sink.name(sink_name.to_string());
         self
     }
 
@@ -168,44 +140,74 @@ impl SignPipelineBuilder<'_> {
     /// Converts this object into a [Pipeline] with the sink name it is using
     /// for the frames
     fn build_raw_pipeline(self) -> Result<PipeInitiator, BuilderError> {
-        // TODO: Swap to use playbin https://gstreamer.freedesktop.org/documentation/tutorials/playback/playbin-usage.html?gi-language=c
-
         // Create the pipeline and add elements
-        let src = self.src.build()?;
-        let convert = self.convert.build()?;
-        let caps = gst::Caps::builder("video/x-raw")
-            .field("format", gst_video::VideoFormat::Rgb.to_string())
-            .build();
-        let sink = self.sink.property("caps", caps).build()?;
-        let video_sink = sink.property::<String>("name");
-        let extras = self.extras?;
-
         let pipe = gst::Pipeline::new();
-        let chain = [&src]
-            .into_iter()
-            .chain(extras.iter())
-            .chain([&convert, &sink]);
+        let src = self.src.build()?;
+        pipe.add_many([&src])?;
 
-        pipe.add_many(chain.clone())?;
-        // We dynamically link the source later on
-        Element::link_many(chain.skip(1))?;
+        // VIDEO
+        let video_convert = self.video_convert.build()?;
+        let video_sink = self.video_sink.caps(&self.video_caps.build()).build();
+        let video_sink_name = video_sink.name().to_string();
+        pipe.add_many([&video_convert, video_sink.upcast_ref()])?;
+        video_convert.link(&video_sink)?;
+
+        // AUDIO
+        let audio_convert = self.audio_convert.build()?;
+        let audio_sink = self.audio_sink.caps(&self.audio_caps.build()).build();
+        let audio_sink_name = audio_sink.name().to_string();
+
+        // DYNAMIC LINKING
 
         let src_info = Arc::new(Mutex::new(None));
         let si = src_info.clone();
-        // Connect the 'pad-added' signal to dynamically link the source to the converter
-        let sn = video_sink.clone();
-        src.connect_pad_added(move |src, pad| {
-            let first_pad = extras
-                .first()
-                .unwrap_or(&convert)
-                .static_pad(&sn)
-                .expect("Could not get expected sink");
 
-            // Only link the pad once
-            if !pad.is_linked() && !first_pad.is_linked() {
-                pad.link(&first_pad).expect("Could not link pad to appsink");
+        // Connect the 'pad-added' signal to dynamically link the source to the converter
+        let pipe_clone = pipe.clone();
+        src.connect_pad_added(move |src, src_pad| {
+            let caps = src_pad.current_caps().expect("Could not get CAPS");
+            let name = caps
+                .structure(0)
+                .expect("Could not get CAPS structure")
+                .name();
+
+            if name.starts_with("audio/") {
+                // We only want to add audio components when they are necessary
+                // (e.g. audio exists in the video format)
+                pipe_clone
+                    .add_many([&audio_convert, audio_sink.upcast_ref()])
+                    .expect("Couldn't add audioconvert and audiosink");
+
+                audio_convert
+                    .link(&audio_sink)
+                    .expect("Couldn't link audioconvert to audiosink");
+
+                audio_convert.sync_state_with_parent().unwrap();
+                audio_sink.sync_state_with_parent().unwrap();
+
+                let sink_pad = audio_convert
+                    .static_pad("sink")
+                    .expect("audioconvert should have a pad");
+
+                if !sink_pad.is_linked() {
+                    src_pad
+                        .link(&sink_pad)
+                        .expect("Could not link audio to src pad");
+                    println!("Connected audio");
+                }
+            } else if name.starts_with("video/") {
+                let sink_pad = video_convert
+                    .static_pad("sink")
+                    .expect("videoconvert should have a pad");
+
+                if !sink_pad.is_linked() {
+                    src_pad
+                        .link(&sink_pad)
+                        .expect("Could not link video to src pad");
+                    println!("Connected video");
+                }
             } else {
-                println!("Pads are already linked")
+                println!("Got an extra pad added we didn't expect, ignoring")
             }
 
             let duration: Timestamp = src.query_duration::<gst::format::Time>().unwrap().into();
@@ -218,7 +220,9 @@ impl SignPipelineBuilder<'_> {
         Ok(PipeInitiator {
             src: src_info,
             pipe: pipe.into(),
-            video_sink,
+            // receiver: rx,
+            video_sink: video_sink_name,
+            audio_sink: audio_sink_name,
             offset: self.start_offset.unwrap_or_default(),
         })
     }
