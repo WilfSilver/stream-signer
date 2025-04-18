@@ -12,11 +12,14 @@ use gst::prelude::{ElementExt, GstBinExt};
 use gst_app::AppSink;
 use tokio::sync::Mutex;
 
-use crate::{file::Timestamp, spec::Vec2u, utils::TimeRange};
+use crate::{
+    file::Timestamp,
+    spec::{Vec2u, MAX_CHUNK_LENGTH, MIN_CHUNK_LENGTH},
+    utils::TimeRange,
+};
 
 use super::{
     frame::FrameWithAudio, Frame, FrameState, Framerate, Pipeline, SigOperationError, StreamError,
-    MAX_CHUNK_LENGTH, MIN_CHUNK_LENGTH,
 };
 
 /// This trait is designed to make it easier to extract the exact bytes which
@@ -341,9 +344,10 @@ pub mod sign {
     use identity_iota::storage::JwkStorageDocumentError;
 
     use crate::{
-        audio::AudioSlice,
         file::SignedInterval,
-        video::{sign::Controller, ChunkSigner, Signer, SigningError, StreamError},
+        video::{
+            audio::AudioSlice, sign::Controller, ChunkSigner, Signer, SigningError, StreamError,
+        },
     };
 
     use super::*;
@@ -552,7 +556,9 @@ pub mod verification {
         verification::jws::{JwsAlgorithm, VerificationInput},
     };
 
-    use crate::{file::SignedInterval, utils::CredentialStore, video::SignatureState, SignFile};
+    use crate::{
+        file::SignedInterval, utils::CredentialStore, video::verify::SignatureState, SignFile,
+    };
 
     use super::*;
 

@@ -1,11 +1,8 @@
 use std::path::Path;
 
-use crate::time::ONE_SECOND_MILLIS;
+use crate::video::{iter::FrameIter, manager::PipeInitiator, StreamError};
 
-use super::{builder::SignPipelineBuilder, iter::FrameIter, manager::PipeInitiator, StreamError};
-
-pub const MAX_CHUNK_LENGTH: usize = 10 * ONE_SECOND_MILLIS as usize;
-pub const MIN_CHUNK_LENGTH: usize = 50;
+use super::SignPipelineBuilder;
 
 /// This is a wrapper type around gstreamer's [gst::Pipeline] providing functions to
 /// sign and verify a stream.
@@ -51,12 +48,13 @@ mod verifying {
     use std::{pin::Pin, sync::Arc, time::Instant};
 
     use crate::{
+        spec::MAX_CHUNK_LENGTH,
         utils::{Delayed, DelayedStream},
         video::manager::verification::{self, SigVideoContext},
         SignFile,
     };
 
-    pub use crate::video::verify::{InvalidSignatureError, SignatureState, VerifiedFrame};
+    pub use crate::video::verify::{FrameWithSignatures, InvalidSignatureError, SignatureState};
 
     use super::*;
 
@@ -66,8 +64,10 @@ mod verifying {
             self,
             resolver: Arc<Resolver>,
             signfile: SignFile,
-        ) -> Result<impl Stream<Item = Result<Pin<Box<VerifiedFrame>>, StreamError>>, StreamError>
-        {
+        ) -> Result<
+            impl Stream<Item = Result<Pin<Box<FrameWithSignatures>>, StreamError>>,
+            StreamError,
+        > {
             let context = SigVideoContext::new(signfile, resolver);
 
             let iter = self.try_into_iter(context)?;
@@ -109,7 +109,7 @@ mod verifying {
 
                     let sigs = manager.verify_signatures().await;
 
-                    let res = Box::pin(VerifiedFrame { state: info, sigs });
+                    let res = Box::pin(FrameWithSignatures { state: info, sigs });
                     if synced {
                         // NOTE: This code looks a bit weird, mostly because
                         // there are various issues with the simple answers:
@@ -141,20 +141,16 @@ mod signing {
     use tokio_stream::wrappers::UnboundedReceiverStream;
 
     use crate::{
-        file::SignedInterval,
-        video::{
+        file::SignedInterval, spec::MAX_CHUNK_LENGTH, video::{
             frame::FrameWithAudio,
-            sign::{
-                AsyncFnMutController, Controller, FnMutController, MultiController,
-                SingleController,
-            },
-            FrameState, SigningError,
-        },
+            manager::sign,
+            sign::{AsyncFnMutController, ChunkSigner, Controller, FnMutController, MultiController, SingleController},
+            FrameState, Signer, SigningError,
+        }
     };
 
     use self::sign::SigningContext;
 
-    pub use super::super::{manager::sign, sign::ChunkSigner, Signer};
     use super::*;
 
     impl SignPipeline {
@@ -489,7 +485,7 @@ mod tests {
     use super::*;
 
     use crate::{
-        spec::Vec2u,
+        spec::{Vec2u, MAX_CHUNK_LENGTH, MIN_CHUNK_LENGTH},
         video::{
             sign::{self, Controller},
             verify::SignatureState,

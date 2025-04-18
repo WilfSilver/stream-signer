@@ -5,7 +5,10 @@ use gst_video::VideoFrameExt;
 
 pub use image::GenericImageView;
 
-use crate::{audio::AudioSlice, spec::Vec2u, video::SigOperationError};
+use crate::{
+    spec::Vec2u,
+    video::{audio::AudioSlice, SigOperationError},
+};
 
 use super::{Framerate, ImageFns};
 
