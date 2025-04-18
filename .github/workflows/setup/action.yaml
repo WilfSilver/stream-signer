@@ -1,5 +1,10 @@
 name: Installs all the dependencies and toolchains required
 description: Runs the setup process required for the Stream Signer crates
+inputs:
+  components:
+    description: The components to use for the toolchain
+    required: false
+
 
 runs:
   using: composite
@@ -14,4 +19,4 @@ runs:
         profile: minimal
         toolchain: stable
         override: true
-        components: rustfmt, clippy
+        components: ${{ inputs.components }}

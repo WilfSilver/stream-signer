@@ -1,0 +1,59 @@
+# Inspired by from https://github.com/dnaka91/advent-of-code/blob/main/.github/workflows/docs.yml
+
+name: Docs deployment
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: Docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Setup
+        uses: ./.github/workflows/setup
+
+      - name: Setup pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Clean docs folder
+        run: cargo clean --doc
+
+      - name: Run cargo doc
+        uses: actions-rs/cargo@v1
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+        with:
+          command: doc
+          args: --all --no-deps
+
+      - name: Add redirect
+        run: echo '<meta http-equiv="refresh" content="0;url=stream_signer/index.html">' > target/doc/index.html
+
+      - name: Remove lock file
+        run: rm target/doc/.lock
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/doc
+
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

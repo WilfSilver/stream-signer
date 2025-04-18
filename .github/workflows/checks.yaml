@@ -69,6 +69,8 @@ jobs:
 
       - name: Setup
         uses: ./.github/workflows/setup
+        with:
+          components: rustfmt, clippy
 
       - name: Run cargo fmt
         uses: actions-rs/cargo@v1
