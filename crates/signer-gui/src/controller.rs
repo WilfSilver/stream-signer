@@ -7,8 +7,9 @@ use common_gui::video::PlayerCtrl;
 use druid::ExtEventSink;
 use futures::{future::BoxFuture, FutureExt};
 use stream_signer::{
+    spec::MAX_CHUNK_LENGTH,
     time::Timestamp,
-    video::{sign::Controller, ChunkSigner, FrameState, MAX_CHUNK_LENGTH},
+    video::{sign::Controller, ChunkSigner, FrameState},
 };
 use testlibs::identity::TestIdentity;
 use tokio::sync::Mutex;

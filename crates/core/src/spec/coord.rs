@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+/// This is a simple [u32] mathematical vector used within the
+/// specification for `pos` and `size`
 #[derive(Debug, Default, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 pub struct Vec2u {
     pub x: u32,

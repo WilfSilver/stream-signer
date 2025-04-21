@@ -1,13 +1,12 @@
 //! This contains the different structures that we may want to store about a
 //! frame.
 
-use crate::video::Pipeline;
+use crate::{
+    utils::TimeRange,
+    video::{audio::AudioSlice, pipeline::SrcInfo, Pipeline},
+};
 
-use crate::audio::AudioFrame;
-use crate::utils::TimeRange;
-
-use crate::video::manager::SrcInfo;
-use crate::video::Frame;
+use super::Frame;
 
 /// An interface to make it easier interacting with the [Frame] and other
 /// aspects of the video (without having the bloated contexts)
@@ -28,7 +27,7 @@ pub struct FrameState {
     /// [Frame::clone] does not clone the underlying object
     pub frame: Frame,
 
-    pub audio: Option<AudioFrame>,
+    pub audio: Option<AudioSlice>,
 
     /// The range of time that this frame is likely to be visible. For more
     /// information see [TimeRange]

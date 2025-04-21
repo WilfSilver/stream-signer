@@ -1,3 +1,6 @@
+//! This stores all the basic types that implement [Controller], allowing
+//! for controlling how and when a video stream is signed.
+
 mod functions;
 mod interval;
 mod multi;

@@ -5,16 +5,22 @@ use crate::video::SigOperationError;
 
 use super::buffer::rate_to_ns;
 
+/// This is the counter part to [super::AudioBuffer], storing information such
+/// that it can be seen
 #[derive(Debug, Clone)]
-pub struct AudioFrame {
+pub struct AudioSlice {
+    /// The buffers which the slice is over
     buffers: Vec<Buffer>,
-    info: AudioInfo,
+    /// The information related to the audio
+    pub info: AudioInfo,
+    /// The index in the first buffer where the slice starts
     start: usize,
+    /// The index in the last buffer where the slice ends
     end: usize,
 }
 
-impl AudioFrame {
-    pub(crate) fn new(buffers: Vec<Buffer>, info: AudioInfo, start: usize, end: usize) -> Self {
+impl AudioSlice {
+    pub const fn new(buffers: Vec<Buffer>, info: AudioInfo, start: usize, end: usize) -> Self {
         Self {
             buffers,
             info,
@@ -23,7 +29,9 @@ impl AudioFrame {
         }
     }
 
-    /// Returns the timestamp of the first object in milliseconds
+    /// Returns the timestamp of where this slice begins in nanoseconds, this
+    /// should roughly equal [crate::video::Frame::get_timestamp] but may not
+    /// be exact as it is calculated separately
     pub fn get_timestamp(&self) -> u64 {
         let timestamp = self
             .buffers
@@ -34,6 +42,9 @@ impl AudioFrame {
         timestamp.nseconds() + self.idx_to_ns(self.start)
     }
 
+    /// Returns the timestamp of the end of the frame in nanoseconds, this
+    /// should roughly equal [crate::video::Frame::get_timestamp] but may not
+    /// be exact as it is calculated separately
     pub fn get_end_timestamp(&self) -> u64 {
         let timestamp = self
             .buffers
@@ -41,18 +52,39 @@ impl AudioFrame {
             .map(Buffer::as_ref)
             .and_then(BufferRef::pts)
             .unwrap_or_default();
+
         // Last timestamp + the length of time a sample lasts
         timestamp.nseconds() + self.idx_to_ns(self.end)
     }
 
+    /// Conversion from the index of a buffer to the relative nanoseconds from
+    /// the start of the buffer
     fn idx_to_ns(&self, idx: usize) -> u64 {
         (idx as f64 * rate_to_ns(self.info.rate())) as u64
     }
 
+    /// Wrapper for [AudioInfo::channels]
     pub fn channels(&self) -> usize {
         self.info.channels() as usize
     }
 
+    /// Returns an iterator over the bytes relating to a specific channel
+    /// within this slice
+    ///
+    /// This is because the audio buffer is organised as follows:
+    ///
+    /// ```txt
+    /// [L0, R0, L1, R1, ...]
+    /// ```
+    ///
+    /// And for signing they need to be organised as follows:
+    ///
+    /// ```txt
+    /// [L0, L1, ..., R0, R1, ...]
+    /// ```
+    ///
+    /// Which is done by [Self::cropped_buffer]
+    ///
     fn unchecked_channel_buffer(&self, i: usize) -> impl Iterator<Item = u8> + '_ {
         let last_idx = self.buffers.len() - 1;
         self.buffers.iter().enumerate().flat_map(move |(j, b)| {
@@ -68,6 +100,21 @@ impl AudioFrame {
         })
     }
 
+    /// This returns an iterator over the bytes needed to sign for a given
+    /// `channels` configuration.
+    ///
+    /// The bytes will be grouped by channel, and only channels that are
+    /// requested are included, if [None] is given, we return all channels
+    ///
+    /// So for example, if `channels` is `vec![1, 0]`, we will return an
+    /// iterator that looks as follows:
+    ///
+    /// ```txt
+    /// [C1_0, C1_1, C1_2, ..., C0_0, C0_1, C0_2, ...]
+    /// ```
+    ///
+    /// Note that the order of the channels is the same order as the given
+    /// vector
     pub fn cropped_buffer<'a>(
         &'a self,
         channels: &'a Option<Vec<usize>>,

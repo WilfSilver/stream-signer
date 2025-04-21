@@ -320,7 +320,6 @@ impl Extend<SignedInterval> for SignFile {
     /// sf.write("./mysignatures.ssrt").expect("Failed to write to file");
     /// ```
     ///
-    ///
     fn extend<T: IntoIterator<Item = SignedInterval>>(&mut self, iter: T) {
         for c in iter {
             self.push(c)
