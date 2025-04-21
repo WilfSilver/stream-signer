@@ -4,7 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [features]
-default = ["signing", "verifying"]
+# Sadly due to https://github.com/rust-lang/cargo/issues/2911, integration
+# tests require testlibs, so to make it easier for linting
+default = ["signing", "verifying", "withtestlibs"]
 signing = []
 verifying = ["credential_store", "delayed_stream"]
 credential_store = []
