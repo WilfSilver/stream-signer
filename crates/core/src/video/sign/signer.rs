@@ -1,5 +1,6 @@
 use std::{future::Future, sync::Arc};
 
+use futures::{future::BoxFuture, FutureExt};
 use identity_iota::{
     credential::Jwt,
     document::CoreDocument,
@@ -19,32 +20,66 @@ impl<T: JwkStorage> KeyBound for T {}
 pub trait KeyIdBound: KeyIdStorage {}
 impl<T: KeyIdStorage> KeyIdBound for T {}
 
+/// This signifies a type which can be used to sign objects and has a
+/// verifiable credential attached to it.
+///
+/// To implement this, it is recommended to implement [IotaSigner], but these
+/// have been split to make it easier to integrate into a non-iota library.
 pub trait Signer: Sync + Send {
+    /// Generates the presentation to give attach to the signature proving
+    /// the authenticity of the signer
+    fn presentation(&self) -> BoxFuture<Result<Jwt, JwkStorageDocumentError>>;
+
+    /// Returns the id that should be given to the presentation and used
+    /// for the `id` field within `presentation`
+    fn get_presentation_id(&self) -> String;
+
+    /// Wraps all the functions above, producing a clean interface to request
+    fn sign<'a>(&'a self, msg: &'a [u8])
+        -> BoxFuture<'a, Result<Vec<u8>, JwkStorageDocumentError>>;
+}
+
+/// This is a simple trait for creating an easier trait to implement for
+/// types from [identity_iota]. If this is implemented, [Signer] is implicitly
+/// also implemented
+pub trait IotaSigner: Sync + Send {
+    /// Generates the presentation to give attach to the signature proving
+    /// the authenticity of the signer
     fn presentation(&self) -> impl Future<Output = Result<Jwt, JwkStorageDocumentError>> + Send;
 
+    /// Returns the core document for which stores the signing method as well
+    /// as public key. This should be accessible via the DID from the verifier
     fn document(&self) -> &CoreDocument;
     fn fragment(&self) -> &str;
 
+    /// Returns the id of the key which will be used to sign the signature
     fn get_key_id(
         &self,
         digest: &MethodDigest,
     ) -> impl Future<Output = KeyIdStorageResult<KeyId>> + Send;
 
-    fn get_presentation_id(&self) -> String {
-        self.document().id().to_string()
-    }
-
+    /// This should sign the `msg` with the given `key_id` from [IotaSigner::get_key_id]
     fn sign_with_key(
         &self,
         key_id: &KeyId,
         msg: &[u8],
         public_key: &Jwk,
     ) -> impl Future<Output = KeyStorageResult<Vec<u8>>> + Send;
+}
 
-    fn sign(
-        &self,
-        msg: &[u8],
-    ) -> impl Future<Output = Result<Vec<u8>, JwkStorageDocumentError>> + Send {
+impl<S: IotaSigner> Signer for S {
+    fn presentation(&self) -> BoxFuture<Result<Jwt, JwkStorageDocumentError>> {
+        self.presentation().boxed()
+    }
+
+    fn get_presentation_id(&self) -> String {
+        self.document().id().to_string()
+    }
+
+    fn sign<'a>(
+        &'a self,
+        msg: &'a [u8],
+    ) -> BoxFuture<'a, Result<Vec<u8>, JwkStorageDocumentError>> {
         async {
             // Obtain the method corresponding to the given fragment.
 
@@ -71,6 +106,7 @@ pub trait Signer: Sync + Send {
 
             Ok(signature)
         }
+        .boxed()
     }
 }
 
@@ -181,7 +217,7 @@ mod testlib_extras {
     };
     use testlibs::identity::TestIdentity;
 
-    impl Signer for TestIdentity {
+    impl IotaSigner for TestIdentity {
         fn document(&self) -> &CoreDocument {
             &self.document
         }

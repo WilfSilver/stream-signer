@@ -1,7 +1,11 @@
+//! Stores basic wrappers around the GStreamer library
+
 use gst::{
     prelude::{ElementExt, ElementExtManual},
-    ClockTime, CoreError, MessageView, SeekFlags, StateChangeSuccess,
+    ClockTime, CoreError, SeekFlags, StateChangeSuccess,
 };
+
+use crate::video::utils::get_bus_errors;
 
 pub trait SetState {
     fn set_state_blocking(&self, new_state: gst::State) -> Result<(), glib::Error>;
@@ -109,23 +113,5 @@ impl SetState for Pipeline {
 impl From<gst::Pipeline> for Pipeline {
     fn from(value: gst::Pipeline) -> Self {
         Self(value)
-    }
-}
-
-/// Drain all messages from the bus, keeping track of eos and error.
-/// (This prevents messages piling up and causing memory leaks)
-fn get_bus_errors(bus: &gst::Bus) -> impl Iterator<Item = glib::Error> + '_ {
-    let errs_warns = [gst::MessageType::Error, gst::MessageType::Warning];
-
-    std::iter::from_fn(move || bus.pop_filtered(&errs_warns).map(into_glib_error))
-}
-
-pub(super) fn into_glib_error(msg: gst::Message) -> glib::Error {
-    match msg.view() {
-        MessageView::Error(e) => e.error(),
-        MessageView::Warning(w) => w.error(),
-        _ => {
-            panic!("Only Warning and Error messages can be converted into GstreamerError")
-        }
     }
 }

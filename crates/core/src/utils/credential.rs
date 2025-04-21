@@ -50,7 +50,6 @@ impl From<ResolverError> for SubjectError {
 
 /// Stores information about the [Subject] and any result determined when trying
 /// to validate a signature.
-/// TODO: FIX
 #[derive(Debug, Clone)]
 pub enum SubjectState {
     Invalid(Vec<Arc<JwtValidationError>>),

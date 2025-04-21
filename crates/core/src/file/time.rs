@@ -16,7 +16,12 @@ pub const ONE_MINUTE_MILLIS: u32 = 60 * ONE_SECOND_MILLIS;
 pub const ONE_HOUR_MILLIS: u32 = 60 * ONE_MINUTE_MILLIS;
 
 /// Wrapper for the timestamp to help converting between `u32` (the milliseconds)
-/// and `srtlib::Timestamp`
+/// and [srtlib::Timestamp]
+///
+/// This is used as the core timestamp object throughout the library, however
+/// it is worth noting that due to this reliance on milliseconds, however when
+/// accuracy is required basic [u64] as nanoseconds is used, as this is
+/// what GStreamer uses.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Timestamp(u32);
 

@@ -12,7 +12,7 @@ use im::Vector;
 use serde_json::json;
 use stream_signer::{
     gst,
-    video::{builder::FramerateOption, verify::SignatureState},
+    video::{pipeline::FramerateOption, verify::SignatureState},
     SignFile, SignPipeline,
 };
 use testlibs::{
