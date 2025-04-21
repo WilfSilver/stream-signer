@@ -4,7 +4,6 @@ use thiserror::Error;
 use crate::video::{SigOperationError, StreamError, VideoError};
 
 /// This stores all the posible errors which may arise while signing a video
-#[cfg(feature = "signing")]
 #[derive(Error, Debug)]
 pub enum SigningError {
     #[error(transparent)]
@@ -15,7 +14,6 @@ pub enum SigningError {
     Sign(#[from] JwkStorageDocumentError),
 }
 
-#[cfg(feature = "signing")]
 impl From<SigningError> for VideoError {
     fn from(value: SigningError) -> Self {
         match value {

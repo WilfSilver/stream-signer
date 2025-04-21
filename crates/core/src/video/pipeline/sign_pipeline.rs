@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use crate::video::{iter::FrameIter, manager::PipeInitiator, StreamError};
+use crate::video::{iter::FrameIter, StreamError};
 
-use super::SignPipelineBuilder;
+use super::{PipeInitiator, SignPipelineBuilder};
 
 /// This is a wrapper type around gstreamer's [gst::Pipeline] providing functions to
 /// sign and verify a stream.

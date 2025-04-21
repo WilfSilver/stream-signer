@@ -44,7 +44,7 @@ fn make_signfile_picker() -> impl Widget<AppData> {
             1.0,
         )
         .with_child(
-            Button::new("Save sign to")
+            Button::new("Open sign file")
                 .on_click(move |ctx, _data: &mut AppData, _env| {
                     ctx.submit_command(
                         druid::commands::SHOW_SAVE_PANEL.with(save_dialog_options.clone()),
