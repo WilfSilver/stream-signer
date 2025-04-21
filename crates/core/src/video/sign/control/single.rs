@@ -16,23 +16,27 @@ use crate::video::{ChunkSigner, FrameState, Signer};
 /// struct MyStruct;
 ///
 /// impl<S: Signer + 'static> SingleController<S> for MyStruct {
-///   fn get_chunk(&self, state: &FrameState) -> BoxFuture<Option<ChunkSigner<S>>> {
-///     async {
-///       todo!()
+///     fn get_chunk(&self, state: &FrameState) -> BoxFuture<Option<ChunkSigner<S>>> {
+///         async {
+///             todo!()
+///         }
+///         .boxed()
 ///     }
-///     .boxed()
-///   }
 /// }
 ///
 /// impl<S: Signer + 'static> Controller<S> for MyStruct {
-///   fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<S>>> {
-///     self.get_as_chunks(state)
-///   }
+///     fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<S>>> {
+///         self.get_as_chunks(state)
+///     }
 /// }
 /// ```
 pub trait SingleController<S: Signer + 'static> {
+    /// Returns a single chunk as an [Option], if a chunk is returned it is
+    /// then used to sign the video
     fn get_chunk(&self, state: &FrameState) -> BoxFuture<Option<ChunkSigner<S>>>;
 
+    /// A simple wrapper to convert [SingleController::get_chunk] to a vector
+    /// so that the type can then implement [super::Controller]
     fn get_as_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<S>>> {
         self.get_chunk(&state).map(opt_to_vec).boxed()
     }

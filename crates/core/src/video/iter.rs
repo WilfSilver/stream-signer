@@ -9,11 +9,8 @@ use gst::{CoreError, MessageView, Sample};
 use gst_app::AppSink;
 
 use super::{
-    audio::AudioBuffer,
-    frame::FrameWithAudio,
-    manager::{PipeInitiator, PipeState},
-    utils::into_glib_error,
-    Frame,
+    audio::AudioBuffer, frame::FrameWithAudio, manager::PipeState, pipeline::PipeInitiator,
+    utils::into_glib_error, Frame,
 };
 
 /// A simple iterator to extract every frame in a given pipeline.

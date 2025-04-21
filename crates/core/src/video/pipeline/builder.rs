@@ -15,9 +15,9 @@ use gst::{
 use gst_app::{app_sink::AppSinkBuilder, AppSink};
 use tokio::sync::Mutex;
 
-use crate::{file::Timestamp, video::manager::SrcInfo};
+use crate::file::Timestamp;
 
-use crate::video::{manager::PipeInitiator, SignPipeline};
+use super::{PipeInitiator, SignPipeline, SrcInfo};
 
 #[derive(Clone, Copy, Debug, Default)]
 pub enum FramerateOption {

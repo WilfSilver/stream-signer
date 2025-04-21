@@ -3,7 +3,7 @@
 
 use crate::{
     utils::TimeRange,
-    video::{audio::AudioSlice, manager::SrcInfo, Pipeline},
+    video::{audio::AudioSlice, pipeline::SrcInfo, Pipeline},
 };
 
 use super::Frame;

@@ -19,7 +19,9 @@ use crate::{
 };
 
 use super::{
-    frame::FrameWithAudio, Frame, FrameState, Framerate, Pipeline, SigOperationError, StreamError,
+    frame::FrameWithAudio,
+    pipeline::{PipeInitiator, SrcInfo},
+    Frame, FrameState, Framerate, Pipeline, SigOperationError, StreamError,
 };
 
 /// This trait is designed to make it easier to extract the exact bytes which
@@ -143,21 +145,6 @@ impl<VC, FC> PipeManager<VC, FC> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct SrcInfo {
-    pub duration: Timestamp,
-}
-
-#[derive(Debug)]
-pub struct PipeInitiator {
-    pub src: Arc<Mutex<Option<SrcInfo>>>,
-    pub pipe: Pipeline,
-    // pub receiver: Receiver<FrameWithAudio>,
-    pub offset: f64,
-    pub video_sink: String,
-    pub audio_sink: String,
-}
-
 #[derive(Debug)]
 pub struct PipeState<VC> {
     /// Stores cached information at the source, and is filled once the source
@@ -261,37 +248,26 @@ impl<VC> PipeState<VC> {
             .expect("Failed to get pipeline from bus. Shouldn't happen!")
     }
 
-    /// Sets the `sync` property in the `sink` to be false so that we
-    /// go through the frames as fast as possible and returns the value
-    /// it was set to
-    pub fn set_clock_sync(&self, val: bool) {
-        let appsink = self
-            .pipe
-            .raw()
-            .by_name(&self.video_sink)
-            .expect("Sink element not found")
-            .downcast::<gst_app::AppSink>()
-            .expect("Sink element is expected to be an appsink!");
+    /// Sets the `sync` property in the `sink` to be the given value returning
+    /// the old value
+    pub fn set_clock_sync(&self, val: bool) -> bool {
+        let video_sink = self.get_video_sink();
 
-        appsink.set_property("sync", val);
+        let sync = video_sink.property("sync");
+        video_sink.set_property("sync", val);
+
+        if let Some(audio_sink) = self.get_audio_sink() {
+            audio_sink.set_property("sync", val);
+        }
+
+        sync
     }
 
     /// Sets the `sync` property in the `sink` to be false so that we
     /// go through the frames as fast as possible and returns the value
     /// it was set to
     pub fn unsync_clock(&self) -> bool {
-        let appsink = self
-            .pipe
-            .raw()
-            .by_name(&self.video_sink)
-            .expect("Sink element not found")
-            .downcast::<gst_app::AppSink>()
-            .expect("Sink element is expected to be an appsink!");
-
-        let sync = appsink.property("sync");
-        appsink.set_property("sync", false);
-
-        sync
+        self.set_clock_sync(false)
     }
 }
 
