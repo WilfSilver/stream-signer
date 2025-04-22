@@ -29,7 +29,14 @@ pub struct FrameState {
     /// [Frame::clone] does not clone the underlying object
     pub frame: Frame,
 
+    /// If there is audio within the processed video, this will have all the
+    /// audio data that is played during the current frame
     pub audio: Option<AudioSlice>,
+
+    /// This is set to try if the current frame is the last frame of the video.
+    /// It's useful for making sure that the last couple frames are always
+    /// signed
+    pub is_last: bool,
 
     /// The range of time that this frame is likely to be visible. For more
     /// information see [TimeRange]

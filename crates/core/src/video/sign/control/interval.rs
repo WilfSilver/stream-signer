@@ -169,15 +169,15 @@ impl<S: Signer + 'static> SingleController<S> for IntervalController<S> {
         };
 
         future::ready({
-            if !time.is_start() && (time % self.interval).is_first() {
+            // Note the is of is_last here means that the last chunk will
+            // always overlap with another. This was mostly done to save time
+            if (!time.is_start() && (time % self.interval).is_first()) || state.is_last {
                 let start = state
                     .time
                     .start()
                     .checked_sub(self.interval)
                     .unwrap_or_default()
                     .into();
-
-                println!("Start: {start:.2?} -> {:.2?}", time.start());
 
                 let mut res = ChunkSigner::new(
                     start,
@@ -188,7 +188,6 @@ impl<S: Signer + 'static> SingleController<S> for IntervalController<S> {
 
                 if let Some(emb) = &self.embedding {
                     res = res.with_embedding(emb.pos, emb.size);
-                    println!("With embedding: {emb:?}");
                 }
 
                 self.is_start.store(true, Ordering::Relaxed);

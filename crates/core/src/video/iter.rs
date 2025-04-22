@@ -168,6 +168,7 @@ impl<VC> Iterator for FrameIter<VC> {
                 Some(Ok(FrameWithAudio {
                     frame,
                     audio: self.audio_buffer.pop_next_frame(fps),
+                    is_last: video_sink.is_eos(),
                 }))
             }
             Some(Err(e)) => Some(Err(e)),

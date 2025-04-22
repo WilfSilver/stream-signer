@@ -204,7 +204,6 @@ impl VerifyFeed {
         })
         .await;
 
-        // TODO: Have a button to return to the main menu
         event_sink.add_idle_callback(|data: &mut AppData| {
             data.view = View::MainMenu;
         });

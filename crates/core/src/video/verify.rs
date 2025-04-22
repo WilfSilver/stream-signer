@@ -71,7 +71,6 @@ impl SignatureState {
             SubjectState::Valid(s) => {
                 let verified = verifier.verify(input, &s.public_key);
                 match verified {
-                    // TODO: Potential to remove clone and use lifetime
                     Ok(()) => Self::Verified(s.clone()),
                     Err(e) => Self::Unverified {
                         error: e.into(),
