@@ -18,6 +18,7 @@ use super::{Framerate, ImageFns};
 pub struct FrameWithAudio {
     pub frame: Frame,
     pub audio: Option<AudioSlice>,
+    pub is_last: bool,
 }
 
 impl FrameWithAudio {

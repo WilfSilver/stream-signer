@@ -55,6 +55,7 @@ impl Controller<TestIdentity> for SignController {
                 .wait_if_paused(&state.pipe)
                 .await;
 
+            let is_last = state.is_last;
             self.event_sink
                 .add_idle_callback(move |data: &mut AppData| {
                     data.video.update_frame(state);
@@ -65,7 +66,10 @@ impl Controller<TestIdentity> for SignController {
             // We want to sign when requested, or if the next frame is going to be past the
             // maximum chunk signing length
             let next_frame_time = time.start() - *last_sign + time.frame_duration();
-            if self.sign_ctrl.load(Ordering::Relaxed) || next_frame_time >= MAX_CHUNK_LENGTH {
+            if self.sign_ctrl.load(Ordering::Relaxed)
+                || next_frame_time >= MAX_CHUNK_LENGTH
+                || is_last
+            {
                 let res = ChunkSigner::new(
                     *last_sign,
                     self.signer.clone(),

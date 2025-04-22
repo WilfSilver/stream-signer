@@ -155,7 +155,6 @@ impl SignFeed {
             .await
             .expect("Failed to sign frame");
 
-        // TODO: Have a button to return to the main menu
         event_sink.add_idle_callback(move |data: &mut AppData| {
             signfile
                 .write(&data.video.options.output)

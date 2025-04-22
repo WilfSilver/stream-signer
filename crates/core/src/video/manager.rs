@@ -124,6 +124,7 @@ impl<VC, FC> PipeManager<VC, FC> {
                 .clone()
                 .expect("Source information was not set"),
             audio: self.frame.raw.audio.clone(),
+            is_last: self.frame.raw.is_last,
             pipe: self.state.pipe.clone(),
             frame: self.frame.raw.frame.clone(),
             frame_idx: self.frame.idx,
@@ -624,14 +625,6 @@ pub mod verification {
                 return SignatureState::Invalid(SigOperationError::InvalidChunkSize(length).into());
             }
 
-            println!("Verifying...");
-            println!(
-                "{:?} -> {:?} : {:?} {:?}",
-                chunk.start(),
-                chunk.stop(),
-                chunk.val.pos,
-                chunk.val.size
-            );
             let frames_buf = self.frame.get_cropped_buffer(
                 sig.pos,
                 sig.size,
