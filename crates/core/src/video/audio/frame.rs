@@ -1,9 +1,11 @@
+use std::time::Duration;
+
 use gst::{Buffer, BufferRef};
 use gst_audio::AudioInfo;
 
-use crate::video::SigOperationError;
+use crate::{file::Timestamp, video::SigOperationError};
 
-use super::buffer::rate_to_ns;
+use super::buffer::rate_to_duration;
 
 /// This is the counter part to [super::AudioBuffer], storing information such
 /// that it can be seen
@@ -32,35 +34,37 @@ impl AudioSlice {
     /// Returns the timestamp of where this slice begins in nanoseconds, this
     /// should roughly equal [crate::video::Frame::get_timestamp] but may not
     /// be exact as it is calculated separately
-    pub fn get_timestamp(&self) -> u64 {
-        let timestamp = self
+    pub fn get_timestamp(&self) -> Timestamp {
+        let timestamp: Timestamp = self
             .buffers
             .first()
             .map(Buffer::as_ref)
             .and_then(BufferRef::pts)
-            .unwrap_or_default();
-        timestamp.nseconds() + self.idx_to_ns(self.start)
+            .unwrap_or_default()
+            .into();
+        timestamp + self.idx_to_duration(self.start)
     }
 
     /// Returns the timestamp of the end of the frame in nanoseconds, this
     /// should roughly equal [crate::video::Frame::get_timestamp] but may not
     /// be exact as it is calculated separately
-    pub fn get_end_timestamp(&self) -> u64 {
-        let timestamp = self
+    pub fn get_end_timestamp(&self) -> Timestamp {
+        let timestamp: Timestamp = self
             .buffers
             .last()
             .map(Buffer::as_ref)
             .and_then(BufferRef::pts)
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into();
 
         // Last timestamp + the length of time a sample lasts
-        timestamp.nseconds() + self.idx_to_ns(self.end)
+        timestamp + self.idx_to_duration(self.end)
     }
 
     /// Conversion from the index of a buffer to the relative nanoseconds from
     /// the start of the buffer
-    fn idx_to_ns(&self, idx: usize) -> u64 {
-        (idx as f64 * rate_to_ns(self.info.rate())) as u64
+    fn idx_to_duration(&self, idx: usize) -> Duration {
+        rate_to_duration(self.info.rate()) * idx as u32
     }
 
     /// Wrapper for [AudioInfo::channels]

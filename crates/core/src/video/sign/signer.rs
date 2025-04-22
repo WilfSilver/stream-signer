@@ -42,6 +42,8 @@ pub trait Signer: Sync + Send {
 /// This is a simple trait for creating an easier trait to implement for
 /// types from [identity_iota]. If this is implemented, [Signer] is implicitly
 /// also implemented
+///
+/// TODO: Example implementations
 pub trait IotaSigner: Sync + Send {
     /// Generates the presentation to give attach to the signature proving
     /// the authenticity of the signer
@@ -144,7 +146,7 @@ pub struct ChunkSigner<S: Signer> {
 impl<S: Signer> ChunkSigner<S> {
     /// Creates a new object, with pos and size set to None (assuming they
     /// will be defined later with [Self::with_embedding])
-    pub fn new(
+    pub const fn new(
         start: Timestamp,
         signer: Arc<S>,
         channels: Option<Vec<usize>>,

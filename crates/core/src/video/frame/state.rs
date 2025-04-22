@@ -14,6 +14,8 @@ use super::Frame;
 /// Note this is slightly different to [crate::video::manager::FrameManager], as
 /// that is more focused on being a nice interface to interact with (and also
 /// we don't need the specific context for this frame)
+///
+/// TODO: Examples
 #[derive(Debug, Clone)]
 pub struct FrameState {
     /// Stores information about the video itself

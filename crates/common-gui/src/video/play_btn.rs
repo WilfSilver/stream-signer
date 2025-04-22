@@ -23,9 +23,9 @@ fn read_svg(svg: &'static str) -> impl Widget<bool> {
         Ok(svg) => svg,
 
         Err(err) => {
-            println!("{}", err);
+            eprintln!("{}", err);
 
-            println!("Using an empty SVG instead.");
+            eprintln!("Using an empty SVG instead.");
 
             SvgData::default()
         }

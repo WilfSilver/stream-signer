@@ -1,9 +1,13 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, time::Duration};
 
 use gst::{Buffer, BufferRef};
 use gst_audio::AudioInfo;
 
-use crate::video::Framerate;
+use crate::{
+    file::Timestamp,
+    time::{ONE_MILLI_NANOS, ONE_SECOND_MILLIS},
+    video::Framerate,
+};
 
 use super::AudioSlice;
 
@@ -12,6 +16,8 @@ use super::AudioSlice;
 ///
 /// This then can be used to produce an [AudioSlice] which can be seen as a
 /// slice over the different audio buffers which relate to the set frame.
+///
+// TODO: Examples
 #[derive(Debug, Default, Clone)]
 pub struct AudioBuffer {
     /// The raw vector of buffers
@@ -26,7 +32,7 @@ pub struct AudioBuffer {
     /// ended)
     start_idx: usize,
     /// Cache of the [Self::start_idx] in nanoseconds
-    rel_start_ns: u64,
+    rel_start: Duration,
 }
 
 impl AudioBuffer {
@@ -48,25 +54,25 @@ impl AudioBuffer {
     }
 
     /// Returns the timestamp of the start of the buffer in nanoseconds
-    pub fn get_timestamp(&self) -> u64 {
+    pub fn get_timestamp(&self) -> Timestamp {
         let timestamp = self
             .buffer
             .front()
             .map(Buffer::as_ref)
             .and_then(BufferRef::pts)
             .unwrap_or_default();
-        timestamp.nseconds()
+        timestamp.into()
     }
 
     /// Returns the timestamp in nanoseconds that the next [gst::Sample] is
     /// expected to be at (or when this object ends)
-    pub fn get_end_timestamp(&self) -> u64 {
+    pub fn get_end_timestamp(&self) -> Timestamp {
         match self.buffer.back() {
             Some(buf) => {
-                let timestamp = buf.pts().unwrap_or_default();
-                timestamp.nseconds() + self.buffer_ns_length(buf)
+                let timestamp: Timestamp = buf.pts().unwrap_or_default().into();
+                timestamp + self.buffer_duration(buf)
             }
-            None => 0,
+            None => Timestamp::ZERO,
         }
     }
 
@@ -87,12 +93,15 @@ impl AudioBuffer {
             return None;
         }
 
-        let fps: Framerate<f64> = rate.into();
-        let frame_length = (fps.convert_to_ms(1) * 1_000_000.) as u64;
+        let frame_length = rate.frame_time() * 1_000_000;
 
-        let buffer_length = self.buffer_ns_length(&self.buffer[0]);
-        let required_length = (self.rel_start_ns + frame_length).div_ceil(buffer_length) as usize;
-        let rel_end_ns = (self.rel_start_ns + frame_length) % buffer_length;
+        let buffer_length = self.buffer_duration(&self.buffer[0]);
+        let required_length = (self.rel_start + frame_length)
+            .as_nanos()
+            .div_ceil(buffer_length.as_nanos()) as usize;
+        let rel_end_ns = Duration::from_nanos(
+            ((self.rel_start + frame_length).as_nanos() % buffer_length.as_nanos()) as u64,
+        );
 
         if self.buffer.len() < required_length {
             return None;
@@ -107,7 +116,7 @@ impl AudioBuffer {
 
         buffers.push(self.buffer[0].clone());
 
-        let end = self.ns_to_idx(rel_end_ns);
+        let end = self.duration_to_idx(rel_end_ns);
 
         let res = Some(AudioSlice::new(
             buffers,
@@ -117,7 +126,7 @@ impl AudioBuffer {
         ));
 
         self.start_idx = end;
-        self.rel_start_ns = rel_end_ns;
+        self.rel_start = rel_end_ns;
 
         res
     }
@@ -126,9 +135,10 @@ impl AudioBuffer {
     ///
     /// NOTE: Assumes that [Self::info] is fine to unwrap
     #[inline]
-    fn ns_to_idx(&self, time: u64) -> usize {
+    fn duration_to_idx(&self, time: Duration) -> usize {
         self.channels().unwrap()
-            * (time as f64 * self.info.as_ref().unwrap().rate() as f64 / 1_000_000_000.) as usize
+            * (time.as_nanos() as f64 * self.info.as_ref().unwrap().rate() as f64
+                / (ONE_MILLI_NANOS * ONE_SECOND_MILLIS) as f64) as usize
     }
 
     /// Returns the nanosecond length for a Buffer, taking into account the
@@ -136,9 +146,9 @@ impl AudioBuffer {
     ///
     /// NOTE: Assumes that [Self::info] is fine to unwrap
     #[inline]
-    fn buffer_ns_length(&self, buf: &Buffer) -> u64 {
-        ((buf.map_readable().unwrap().len() / self.channels().unwrap()) as f64
-            * rate_to_ns(self.info.as_ref().unwrap().rate())) as u64
+    fn buffer_duration(&self, buf: &Buffer) -> Duration {
+        rate_to_duration(self.info.as_ref().unwrap().rate())
+            * (buf.map_readable().unwrap().len() / self.channels().unwrap()) as u32
     }
 }
 
@@ -153,7 +163,7 @@ impl From<gst::Sample> for AudioBuffer {
 
         Self {
             start_idx: 0,
-            rel_start_ns: 0,
+            rel_start: Duration::ZERO,
             buffer: VecDeque::from_iter([buffer]),
             info,
         }
@@ -162,6 +172,6 @@ impl From<gst::Sample> for AudioBuffer {
 
 /// Converts the given rate to nanoseconds per level
 #[inline]
-pub(crate) const fn rate_to_ns(rate: u32) -> f64 {
-    1_000_000_000. / rate as f64
+pub(crate) fn rate_to_duration(rate: u32) -> Duration {
+    Duration::from_secs_f64(1. / rate as f64)
 }

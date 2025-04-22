@@ -6,12 +6,14 @@ use gst_video::VideoFrameExt;
 pub use image::GenericImageView;
 
 use crate::{
+    file::Timestamp,
     spec::Vec2u,
     video::{audio::AudioSlice, SigOperationError},
 };
 
 use super::{Framerate, ImageFns};
 
+// TODO: Documentation
 #[derive(Debug, Clone)]
 pub struct FrameWithAudio {
     pub frame: Frame,
@@ -39,6 +41,7 @@ impl FrameWithAudio {
     }
 }
 
+// TODO: Documetation
 #[derive(Debug)]
 pub struct Frame(gst_video::VideoFrame<gst_video::video_frame::Readable>);
 
@@ -81,18 +84,16 @@ impl Frame {
     }
 
     /// Returns the number of nanoseconds this frame should appear at
-    pub fn get_timestamp(&self) -> u64 {
+    pub fn get_timestamp(&self) -> Timestamp {
         let timestamp = self.0.buffer().pts().unwrap_or_default();
-        timestamp.nseconds()
+        timestamp.into()
     }
 
     /// Returns the number of nanoseconds this frame should stop appearing
     /// at (i.e. the next frame)
-    pub fn get_end_timestamp(&self) -> u64 {
-        let timestamp = self.0.buffer().pts().unwrap_or_default();
-        let fps: Framerate<f64> = self.fps().into();
-        let length = fps.convert_to_ms(1) * 1000000.; // Millisecond to nanosecond
-        timestamp.nseconds() + length as u64
+    pub fn get_end_timestamp(&self) -> Timestamp {
+        let timestamp: Timestamp = self.0.buffer().pts().unwrap_or_default().into();
+        timestamp + self.fps().frame_time()
     }
 
     /// Returns the raw slice of bytes of the [Frame].

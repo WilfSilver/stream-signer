@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 #[cfg(feature = "signing")]
 use identity_iota::storage::JwkStorageDocumentError;
 
@@ -35,10 +37,10 @@ pub enum VideoError {
 /// is apart of)
 #[derive(Error, Debug, Clone)]
 pub enum SigOperationError {
-    #[error("Tried to access range which is not covered by the video: {0} -> {1}")]
+    #[error("Tried to access range which is not covered by the video: {0:.2?} -> {1:.2?}")]
     OutOfRange(Timestamp, Timestamp),
-    #[error("The size of the chunk spread over {0} ms which is not allowed")]
-    InvalidChunkSize(usize),
+    #[error("The size of the chunk spread over {0:.2?} which is not allowed")]
+    InvalidChunkSize(Duration),
     #[error("Could not crop frame with pos {0:?} and size {1:?}")]
     InvalidCrop(Vec2u, Vec2u),
     #[error("The given channels do not exists {0:?}")]

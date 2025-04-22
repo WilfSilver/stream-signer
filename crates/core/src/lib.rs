@@ -36,6 +36,6 @@ pub mod video;
 pub use crate::file::{time, SignFile};
 pub use video::SignPipeline;
 
-pub use futures::TryStreamExt;
+pub use futures::{StreamExt, TryStreamExt};
 
 pub use gst;

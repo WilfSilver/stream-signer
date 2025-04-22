@@ -99,7 +99,7 @@ impl<T: Clone + Data> VideoState<T> {
 
     pub fn update_frame(&mut self, frame: FrameState) {
         self.duration = Some(frame.video.duration);
-        self.progress = f64::from(frame.time.start()) / f64::from(frame.video.duration);
+        self.progress = frame.time.start().as_secs_f64() / frame.video.duration.as_secs_f64();
         self.curr_frame = Some(frame.into());
     }
 

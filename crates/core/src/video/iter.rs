@@ -8,6 +8,8 @@ use std::{iter::FusedIterator, sync::Arc};
 use gst::{CoreError, MessageView, Sample};
 use gst_app::AppSink;
 
+use crate::file::Timestamp;
+
 use super::{
     audio::AudioBuffer, frame::FrameWithAudio, manager::PipeState, pipeline::PipeInitiator,
     utils::into_glib_error, Frame,
@@ -19,6 +21,8 @@ use super::{
 ///
 /// Assumptions made:
 /// - Frame rate is not >1000
+///
+/// TODO: Examples
 #[derive(Debug)]
 pub struct FrameIter<VC> {
     /// The state of the iterator, storing key information about the
@@ -69,7 +73,7 @@ impl<VC> FrameIter<VC> {
     /// Seek to the given position in the file, passing the 'accurate' flag to gstreamer.
     /// If you want to make large jumps in a video file this may be faster than setting a
     /// very low framerate (because with a low framerate, gstreamer still decodes every frame).
-    pub fn seek_accurate(&self, time: f64) -> Result<(), glib::Error> {
+    pub fn seek_accurate(&self, time: Timestamp) -> Result<(), glib::Error> {
         self.state.seek_accurate(time)
     }
 

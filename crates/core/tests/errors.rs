@@ -1,7 +1,9 @@
+mod constants;
 mod utils;
 
 use std::{error::Error, sync::Arc};
 
+use constants::ONE_HUNDRED_MILLIS;
 use futures::{StreamExt, TryStreamExt};
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use serde_json::json;
@@ -43,7 +45,10 @@ async fn verify_unresolvable() -> Result<(), Box<dyn Error>> {
     let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
     let signfile = pipe
-        .sign_with(sign::IntervalController::build(Arc::new(identity), 100))?
+        .sign_with(sign::IntervalController::build(
+            Arc::new(identity),
+            ONE_HUNDRED_MILLIS,
+        ))?
         .try_collect::<SignFile>()
         .await?;
 

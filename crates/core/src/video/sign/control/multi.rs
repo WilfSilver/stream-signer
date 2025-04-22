@@ -23,6 +23,7 @@ use super::{Controller, SingleController};
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn Error>> {
 /// use std::sync::Arc;
+/// use std::time::Duration;
 /// use stream_signer::{video::{sign, Signer}, SignPipeline, SignFile, TryStreamExt};
 ///
 /// stream_signer::gst::init()?;
@@ -62,8 +63,8 @@ use super::{Controller, SingleController};
 /// let bob_signer = Arc::new(bob_identity);
 ///
 /// let controller = sign::MultiController(vec![
-///     Box::new(sign::IntervalController::build(alice_signer, 100)),
-///     Box::new(sign::IntervalController::build(bob_signer, 100)),
+///     Box::new(sign::IntervalController::build(alice_signer, Duration::from_millis(100))),
+///     Box::new(sign::IntervalController::build(bob_signer, Duration::from_millis(100))),
 /// ]);
 ///
 /// let sign_file = pipeline.sign_with(controller)

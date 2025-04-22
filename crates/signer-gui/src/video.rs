@@ -4,6 +4,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::Duration,
 };
 
 use std::io::prelude::*;
@@ -87,14 +88,14 @@ impl Widget<State> for SignOverlay {
             return;
         };
 
-        let sign_border_length = 500;
+        let sign_border_length = Duration::from_millis(500);
         let time_since_last_sign = info.time.start() - data.options.last_sign;
-        if time_since_last_sign < sign_border_length.into() {
-            let sbl = sign_border_length as f64;
+        if time_since_last_sign < sign_border_length {
+            let sbl = sign_border_length.as_secs_f64();
             let rect = ctx.size().to_rect();
             ctx.stroke(
                 rect,
-                &Color::rgba(1., 0., 0., (sbl - *time_since_last_sign as f64) / sbl),
+                &Color::rgba(1., 0., 0., (sbl - time_since_last_sign.as_secs_f64()) / sbl),
                 50.,
             );
         }
