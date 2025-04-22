@@ -12,11 +12,7 @@ use gst::prelude::{ElementExt, GstBinExt};
 use gst_app::AppSink;
 use tokio::sync::Mutex;
 
-use crate::{
-    file::Timestamp,
-    spec::{Vec2u, MAX_CHUNK_LENGTH, MIN_CHUNK_LENGTH},
-    utils::TimeRange,
-};
+use crate::{file::Timestamp, spec::Vec2u, utils::TimeRange};
 
 use super::{
     frame::FrameWithAudio,
@@ -48,7 +44,6 @@ pub trait FrameBuffer {
         range: Range<usize>,
         channels: &Option<Vec<usize>>,
     ) -> Result<Vec<u8>, SigOperationError> {
-        // TODO: Add audio
         let capacity = 3 * size.x as usize * size.y as usize * range.len();
         let mut frames_buf: Vec<u8> = Vec::new();
         frames_buf.reserve_exact(capacity);
@@ -99,15 +94,8 @@ impl<VC, FC> PipeManager<VC, FC> {
         state: Arc<PipeState<VC>>,
         frame_info: (usize, Result<FrameWithAudio, StreamError>, FC),
     ) -> Result<Self, StreamError> {
-        let offset = state.offset;
-
         Ok(Self {
-            frame: Arc::new(FrameManager::new(
-                frame_info.0,
-                frame_info.1?,
-                frame_info.2,
-                offset,
-            )),
+            frame: Arc::new(FrameManager::new(frame_info.0, frame_info.1?, frame_info.2)),
             state,
         })
     }
@@ -125,8 +113,7 @@ impl<VC, FC> PipeManager<VC, FC> {
     }
 
     pub async fn get_frame_state(&self) -> FrameState {
-        let fps: Framerate<f64> = self.fps().into();
-        let exact_time = self.state.offset + fps.convert_to_ms(self.frame.idx);
+        let exact_time = self.frame.raw.frame.get_timestamp();
 
         FrameState {
             video: self
@@ -140,7 +127,7 @@ impl<VC, FC> PipeManager<VC, FC> {
             pipe: self.state.pipe.clone(),
             frame: self.frame.raw.frame.clone(),
             frame_idx: self.frame.idx,
-            time: TimeRange::new(exact_time, fps.milliseconds() / fps.frames()),
+            time: TimeRange::new(exact_time, self.fps().frame_time()),
         }
     }
 }
@@ -154,7 +141,7 @@ pub struct PipeState<VC> {
     /// The raw gstreamer pipelien
     pub pipe: Pipeline,
     /// The start offset time for the video
-    pub offset: f64,
+    pub offset: Timestamp,
     /// Any extra context which is stored about the state
     pub context: VC,
 
@@ -185,7 +172,7 @@ impl<VC> PipeState<VC> {
 
         state.pause()?;
 
-        if init.offset > 0.0 {
+        if init.offset > Timestamp::ZERO {
             state.seek_accurate(init.offset)?;
         }
 
@@ -212,7 +199,7 @@ impl<VC> PipeState<VC> {
     /// Seek to the given position in the file, passing the 'accurate' flag to gstreamer.
     /// If you want to make large jumps in a video file this may be faster than setting a
     /// very low framerate (because with a low framerate, gstreamer still decodes every frame).
-    pub fn seek_accurate(&self, time: f64) -> Result<(), glib::Error> {
+    pub fn seek_accurate(&self, time: Timestamp) -> Result<(), glib::Error> {
         self.pipe.seek_accurate(time)
     }
 
@@ -276,9 +263,6 @@ impl<VC> PipeState<VC> {
 pub struct FrameManager<FC> {
     /// The relative index to the start of the video itself
     pub idx: usize,
-    /// The number of frames which could be shown within the next millisecond
-    /// (the minimum unit for [Timestamp])
-    pub excess_frames: usize,
 
     /// The raw frame information
     pub raw: FrameWithAudio,
@@ -291,12 +275,11 @@ pub struct FrameManager<FC> {
 }
 
 impl<FC> FrameManager<FC> {
-    pub fn new(idx: usize, frame: FrameWithAudio, context: FC, offset: f64) -> Self {
-        let (timestamp, excess_frames) = Timestamp::from_frames(idx, frame.frame.fps(), offset);
+    pub fn new(idx: usize, frame: FrameWithAudio, context: FC) -> Self {
+        let timestamp = frame.frame.get_timestamp();
 
         Self {
             idx,
-            excess_frames,
             raw: frame,
             timestamp,
             context,
@@ -321,6 +304,7 @@ pub mod sign {
 
     use crate::{
         file::SignedInterval,
+        spec::CHUNK_LENGTH_RANGE,
         video::{
             audio::AudioSlice, sign::Controller, ChunkSigner, Signer, SigningError, StreamError,
         },
@@ -421,13 +405,13 @@ pub mod sign {
         fn get_chunk_start(
             &self,
             start: Timestamp,
-            start_offset: f64,
+            start_offset: Timestamp,
         ) -> Result<usize, SigOperationError> {
             self.context
                 .len()
                 .checked_sub(
                     self.idx
-                        - self.excess_frames
+                        - self.timestamp.excess_frames(self.raw.frame.fps())
                         - start.into_frames(self.raw.frame.fps(), start_offset),
                 )
                 .ok_or(SigOperationError::OutOfRange(start, self.timestamp))
@@ -440,7 +424,7 @@ pub mod sign {
         pub fn sign<S>(
             &self,
             signer: ChunkSigner<S>,
-            start_offset: f64,
+            start_offset: Timestamp,
         ) -> Result<
             impl Future<Output = Result<SignedInterval, JwkStorageDocumentError>>,
             SigOperationError,
@@ -448,8 +432,9 @@ pub mod sign {
         where
             S: Signer + 'static,
         {
-            let length: usize = (self.timestamp - signer.start).into();
-            if !(MIN_CHUNK_LENGTH..=MAX_CHUNK_LENGTH).contains(&length) {
+            // TODO: Checked sub
+            let length = self.timestamp - signer.start;
+            if !CHUNK_LENGTH_RANGE.contains(&length) {
                 return Err(SigOperationError::InvalidChunkSize(length));
             }
 
@@ -533,7 +518,8 @@ pub mod verification {
     };
 
     use crate::{
-        file::SignedInterval, utils::CredentialStore, video::verify::SignatureState, SignFile,
+        file::SignedInterval, spec::CHUNK_LENGTH_RANGE, utils::CredentialStore,
+        video::verify::SignatureState, SignFile,
     };
 
     use super::*;
@@ -628,16 +614,24 @@ pub mod verification {
 
         /// Verifies a single chunk
         async fn verify_sig(&self, chunk: SignedInterval) -> SignatureState {
-            let end_frame = self.convert_to_frames(chunk.stop.into())
-                - self.convert_to_frames(chunk.start.into());
+            let end_frame =
+                self.convert_to_frames(chunk.stop()) - self.convert_to_frames(chunk.start());
 
             let sig = &chunk.val;
 
-            let length: usize = (chunk.stop - chunk.start) as usize;
-            if !(MIN_CHUNK_LENGTH..=MAX_CHUNK_LENGTH).contains(&length) {
+            let length = chunk.stop() - chunk.start();
+            if !CHUNK_LENGTH_RANGE.contains(&length) {
                 return SignatureState::Invalid(SigOperationError::InvalidChunkSize(length).into());
             }
 
+            println!("Verifying...");
+            println!(
+                "{:?} -> {:?} : {:?} {:?}",
+                chunk.start(),
+                chunk.stop(),
+                chunk.val.pos,
+                chunk.val.size
+            );
             let frames_buf = self.frame.get_cropped_buffer(
                 sig.pos,
                 sig.size,

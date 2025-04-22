@@ -31,6 +31,8 @@ pub type BuilderError = glib::BoolError;
 /// Enables building, signing and verifying videos
 ///
 /// For examples, please see [SignPipeline]
+///
+/// TODO: Examples
 pub struct SignPipelineBuilder<'a> {
     /// The source element, which is by default a `uridecodebin`
     pub src: ElementBuilder<'a>,
@@ -43,7 +45,7 @@ pub struct SignPipelineBuilder<'a> {
     pub audio_sink: AppSinkBuilder,
     pub audio_caps: gst_audio::AudioCapsBuilder<caps::NoFeature>,
 
-    start_offset: Option<f64>,
+    start_offset: Option<Timestamp>,
 }
 
 impl SignPipelineBuilder<'_> {
@@ -121,8 +123,8 @@ impl SignPipelineBuilder<'_> {
     }
 
     /// Jump to the given time in seconds before beginning to return frames.
-    pub fn with_start_offset(mut self, seconds: f64) -> Self {
-        self.start_offset = Some(seconds);
+    pub fn with_start_offset(mut self, time: Timestamp) -> Self {
+        self.start_offset = Some(time);
         self
     }
 
@@ -214,7 +216,7 @@ impl SignPipelineBuilder<'_> {
                     println!("Connected video");
                 }
             } else {
-                println!("Got an extra pad added we didn't expect, ignoring")
+                eprintln!("Got an extra pad added we didn't expect, ignoring")
             }
 
             let duration: Timestamp = src.query_duration::<gst::format::Time>().unwrap().into();

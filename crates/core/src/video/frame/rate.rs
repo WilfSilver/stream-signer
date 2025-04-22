@@ -6,7 +6,7 @@ use std::{
 use num_traits::NumCast;
 use tokio::time::{self, Duration, Sleep};
 
-use crate::time::ONE_SECOND_MILLIS;
+use crate::{file::Timestamp, time::ONE_SECOND_MILLIS};
 
 /// Basic trait to capture all the possible types available to be used in the
 /// Framerate type
@@ -26,6 +26,8 @@ impl<T> FramerateCompatible for T where
 /// It is generic to provide better options of how you want the outputs of the
 /// function, for example if you wish outputs as floats you can convert between
 /// them.
+///
+/// TODO: Examples
 #[derive(Debug, Clone, Copy)]
 pub struct Framerate<T>(T, T)
 where
@@ -58,34 +60,37 @@ where
         self.seconds() * <T as NumCast>::from(ONE_SECOND_MILLIS).unwrap()
     }
 
-    /// This converts the given index of current frame into the number of
-    /// milliseconds for the video
+    /// This converts the given index of current frame into the timestamp for
+    /// the video
     ///
-    /// Note if the framerate is over 1000fps, some frames my have the same
-    /// timestamp
+    /// Due to the underlying times using nanoseconds, there should be little
+    /// loss
     #[inline]
-    pub fn convert_to_ms(&self, frames: usize) -> T {
-        <T as NumCast>::from(frames).unwrap() * self.milliseconds() / self.frames()
+    pub fn convert_to_time(&self, frames: usize) -> Timestamp {
+        Timestamp::from(self.frame_time() * frames as u32)
     }
 
-    /// This converts the given number of milliseconds into an index for the
+    /// This converts the given [Duration] into an index for the
     /// frame which is associated with that time frame.
     ///
     /// Note if the framerate is over 1000fps, some frames my have the same
     /// timestamp
     #[inline]
-    pub fn convert_to_frames(&self, milli: T) -> usize {
-        <usize as NumCast>::from(milli * self.frames() / self.milliseconds()).unwrap()
+    pub fn convert_to_frames(&self, duration: Duration) -> usize {
+        (duration * <u32 as NumCast>::from(self.frames()).unwrap()
+            / <u32 as NumCast>::from(self.milliseconds()).unwrap())
+        .as_millis() as usize
+    }
+
+    /// This returns the amount of time a frame is expected to be visible for
+    /// with the given framerate
+    pub fn frame_time(&self) -> Duration {
+        Duration::from_secs_f64(<f64 as NumCast>::from(self.seconds()).unwrap())
+            .div(<u32 as NumCast>::from(self.frames()).unwrap())
     }
 }
 
 impl Framerate<usize> {
-    /// This returns the amount of time a frame is expected to be visible for
-    /// with the given framerate
-    pub fn frame_time(&self) -> Duration {
-        Duration::from_secs(self.seconds() as u64).div(self.frames() as u32)
-    }
-
     /// Sleeps for the remainder of the time a frame should be shown, with
     /// the `taken` being the current time used within the frame
     #[inline]
@@ -100,18 +105,6 @@ where
 {
     fn from(value: Framerate<T>) -> Self {
         (value.frames(), value.seconds())
-    }
-}
-
-impl<T> Default for Framerate<T>
-where
-    T: FramerateCompatible,
-{
-    fn default() -> Self {
-        Framerate(
-            <T as NumCast>::from(60).unwrap(),
-            <T as NumCast>::from(1).unwrap(),
-        )
     }
 }
 

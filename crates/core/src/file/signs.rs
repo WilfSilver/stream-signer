@@ -20,8 +20,8 @@ pub struct SignedInterval(RawSignedInterval);
 impl SignedInterval {
     pub fn new(from: Timestamp, to: Timestamp, signature: ChunkSignature) -> Self {
         SignedInterval(RawSignedInterval {
-            start: from.into(),
-            stop: to.into(),
+            start: from.as_millis_u32(),
+            stop: to.as_millis_u32(),
             val: signature,
         })
     }
@@ -41,6 +41,14 @@ impl SignedInterval {
             SrtTimestamp::from_milliseconds(self.stop),
             serde_json::to_string(&self.val)?,
         ))
+    }
+
+    pub const fn start(&self) -> Timestamp {
+        Timestamp::from_millis_u32(self.0.start)
+    }
+
+    pub const fn stop(&self) -> Timestamp {
+        Timestamp::from_millis_u32(self.0.stop)
     }
 }
 
@@ -105,7 +113,7 @@ impl<'a> From<SignedChunk<'a>> for SignedInterval {
 ///
 /// ```no_run
 /// use stream_signer::{
-///     file::{SignedInterval, SignFile},
+///     file::{SignedInterval, SignFile, Timestamp},
 ///     spec::{ChunkSignature, Vec2u, PresentationOrId},
 /// };
 /// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
@@ -123,7 +131,7 @@ impl<'a> From<SignedChunk<'a>> for SignedInterval {
 ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
 /// };
 ///
-/// sf.push(SignedInterval::new(0.into(), 1000.into(), signature_info));
+/// sf.push(SignedInterval::new(Timestamp::ZERO, Timestamp::from_millis(1000), signature_info));
 ///
 /// sf.write("./mysignatures.ssrt").expect("Failed to write signature file");
 /// ```
@@ -131,11 +139,11 @@ impl<'a> From<SignedChunk<'a>> for SignedInterval {
 /// Or reading signatures for a given time frame
 ///
 /// ```no_run
-/// use stream_signer::SignFile;
+/// use stream_signer::{SignFile, file::Timestamp};
 ///
 /// let sf = SignFile::from_file("./mysignatures.ssrt").expect("Failed to read sign file");
 ///
-/// for s in sf.get_signatures_at(2000.into()) { // Get at 2 seconds mark
+/// for s in sf.get_signatures_at(Timestamp::from_millis(2000)) { // Get at 2 seconds mark
 ///   // ...
 /// }
 /// ```
@@ -179,7 +187,7 @@ impl SignFile {
     ///
     /// ```no_run
     /// use stream_signer::{
-    ///     file::{SignFile, SignedInterval},
+    ///     file::{SignFile, SignedInterval, Timestamp},
     ///     spec::{Vec2u, PresentationOrId, ChunkSignature},
     /// };
     /// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
@@ -197,7 +205,7 @@ impl SignFile {
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };
     ///
-    /// sf.push(SignedInterval::new(0.into(), 1000.into(), signature_info));
+    /// sf.push(SignedInterval::new(Timestamp::ZERO, Timestamp::from_millis(1000), signature_info));
     ///
     /// sf.write("./mysignatures.ssrt").expect("Failed to write to file");
     /// ```
@@ -210,19 +218,24 @@ impl SignFile {
     /// the full ranges in which they apply for.
     ///
     /// ```no_run
-    /// use stream_signer::SignFile;
+    /// use stream_signer::{file::Timestamp, SignFile};
     ///
     /// let sf = SignFile::from_file("./mysignatures.ssrt").expect("Failed to read file");
     ///
-    /// for s in sf.get_signatures_at(2000.into()) { // Get at 2 seconds mark
+    /// for s in sf.get_signatures_at(Timestamp::from_millis(2000)) { // Get at 2 seconds mark
     ///   // ...
     /// }
     /// ```
     ///
     pub fn get_signatures_at(&self, at: Timestamp) -> impl Iterator<Item = SignedChunk<'_>> {
         self.0
-            .find(at.into(), at.into())
-            .map(|i| SignedChunk::new(i.start.into()..i.stop.into(), &i.val))
+            .find(at.as_millis_u32(), at.as_millis_u32())
+            .map(|i| {
+                SignedChunk::new(
+                    Timestamp::from_millis_u32(i.start)..Timestamp::from_millis_u32(i.stop),
+                    &i.val,
+                )
+            })
     }
 
     /// Iterates over all the `SignedInterval`s stored in the tree, note this is
@@ -235,7 +248,7 @@ impl SignFile {
     ///
     /// ```no_run
     /// use stream_signer::{
-    ///     file::{SignFile, SignedInterval},
+    ///     file::{SignFile, SignedInterval, Timestamp},
     ///     spec::{Vec2u, PresentationOrId, ChunkSignature},
     /// };
     /// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
@@ -253,7 +266,7 @@ impl SignFile {
     ///      signature: STANDARD_NO_PAD.decode(s).unwrap()
     /// };
     ///
-    /// sf.push(SignedInterval::new(0.into(), 1000.into(), signature_info));
+    /// sf.push(SignedInterval::new(Timestamp::ZERO, Timestamp::from_millis(1000), signature_info));
     ///
     /// sf.write("./mysignatures.ssrt").expect("Failed to write sign file");
     /// ```
@@ -285,7 +298,7 @@ impl Extend<SignedInterval> for SignFile {
     ///
     /// ```no_run
     /// use stream_signer::{
-    ///     file::{SignFile, SignedInterval},
+    ///     file::{SignFile, SignedInterval, Timestamp},
     ///     spec::{Vec2u, PresentationOrId, ChunkSignature},
     /// };
     /// use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
@@ -312,8 +325,8 @@ impl Extend<SignedInterval> for SignFile {
     /// };
     ///
     /// sf.extend(vec![
-    ///   SignedInterval::new(0.into(), 1000.into(), first_signature),
-    ///   SignedInterval::new(1000.into(), 2000.into(), second_signature),
+    ///   SignedInterval::new(Timestamp::ZERO, Timestamp::from_millis(1000), first_signature),
+    ///   SignedInterval::new(Timestamp::from_millis(1000), Timestamp::from_millis(2000), second_signature),
     ///   // ...
     /// ]);
     ///

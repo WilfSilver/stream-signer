@@ -59,7 +59,56 @@ mod verifying {
     use super::*;
 
     impl SignPipeline {
-        // TODO: Write documentation :)
+        /// This iterates over the frames of the video, processing all the
+        /// signatures and verifying them. The returned stream gives the
+        /// [FrameWithSignatures] which stores the frame state as well as all
+        /// the signatures that appear over that frame.
+        ///
+        /// ## Example
+        ///
+        /// ```no_run
+        /// # use std::error::Error;
+        /// # use identity_iota::{core::FromJson, credential::Subject, did::DID};
+        /// # use serde_json::json;
+        /// # use testlibs::{
+        /// #     client::{get_client, get_resolver},
+        /// #     identity::TestIdentity,
+        /// #     issuer::TestIssuer,
+        /// #     test_video, videos,
+        /// # };
+        /// #
+        /// # #[tokio::main]
+        /// # async fn main() -> Result<(), Box<dyn Error>> {
+        /// use std::sync::Arc;
+        /// use stream_signer::{video::{sign, Signer}, SignPipeline, SignFile, StreamExt, TryStreamExt};
+        ///
+        /// stream_signer::gst::init()?;
+        /// #
+        /// # let client = get_client();
+        /// # let resolver = get_resolver(client);
+        ///
+        /// let pipeline = SignPipeline::build("https://example.com/video_feed").build()?;
+        /// let signfile = SignFile::from_file("./my_signatures.ssrt")?;
+        ///
+        /// pipeline.verify(resolver, signfile)?
+        ///     .for_each(|info| async move {
+        ///         let info = match info {
+        ///             Ok(info) => info,
+        ///             Err(e) => {
+        ///                 panic!("Frame was invalid: {e}");
+        ///             }
+        ///         };
+        ///
+        ///         let frame = &info.state.frame;
+        ///         let sigs = &info.sigs;
+        ///
+        ///         // ...
+        ///     })
+        ///     .await;
+        ///
+        /// # Ok(())
+        /// # }
+        /// ```
         pub fn verify(
             self,
             resolver: Arc<Resolver>,
@@ -183,13 +232,14 @@ mod signing {
         /// # #[tokio::main]
         /// # async fn main() -> Result<(), Box<dyn Error>> {
         /// use std::sync::Arc;
+        /// use std::time::Duration;
         /// use stream_signer::{video::{sign, Signer}, SignPipeline, SignFile, TryStreamExt};
         ///
         /// stream_signer::gst::init()?;
-        ///
+        /// #
         /// # let client = get_client();
         /// # let issuer = TestIssuer::new(client.clone()).await?;
-        ///
+        /// #
         /// # let identity = TestIdentity::new(&issuer, |id| {
         /// #     Subject::from_json_value(json!({
         /// #       "id": id.as_str(),
@@ -207,11 +257,13 @@ mod signing {
         ///
         /// let signer = Arc::new(identity);
         ///
-        /// let sign_file = pipeline.sign_with(sign::IntervalController::build(signer, 100))
-        ///     .expect("Failed to start stream")
-        ///     .try_collect::<SignFile>()
-        ///     .await
-        ///     .expect("Failed to look at frame");
+        /// let sign_file = pipeline.sign_with(
+        ///     sign::IntervalController::build(signer, Duration::from_millis(100))
+        /// )
+        /// .expect("Failed to start stream")
+        /// .try_collect::<SignFile>()
+        /// .await
+        /// .expect("Failed to look at frame");
         ///
         /// sign_file.write("./my_signatures.ssrt").expect("Failed to write signfile");
         ///
@@ -276,7 +328,7 @@ mod signing {
                     Ok(m) => m,
                     Err(e) => {
                         if let Err(e) = sender.send(Err(e)) {
-                            println!("Error when sending (exiting thread): {e:?}");
+                            eprintln!("Error when sending (exiting thread): {e:?}");
                             return Ok(());
                         }
                         continue;
@@ -288,7 +340,7 @@ mod signing {
                 let sender = sender.clone();
                 tokio::spawn(chunks.for_each_concurrent(3, move |message| {
                     if let Err(e) = sender.send(message) {
-                        println!("Error when sending (exiting thread): {e:?}");
+                        eprintln!("Error when sending (exiting thread): {e:?}");
                     }
                     std::future::ready(())
                 }));
@@ -316,13 +368,14 @@ mod signing {
         /// # #[tokio::main]
         /// # async fn main() -> Result<(), Box<dyn Error>> {
         /// use std::sync::Arc;
+        /// use std::time::Duration;
         /// use stream_signer::{video::{sign, Signer}, SignPipeline, SignFile, TryStreamExt};
         ///
         /// stream_signer::gst::init()?;
-        ///
+        /// #
         /// # let client = get_client();
         /// # let issuer = TestIssuer::new(client.clone()).await?;
-        ///
+        /// #
         /// # let alice_identity = TestIdentity::new(&issuer, |id| {
         /// #     Subject::from_json_value(json!({
         /// #       "id": id.as_str(),
@@ -335,7 +388,7 @@ mod signing {
         /// #     })).unwrap()
         /// # })
         /// # .await?;
-        ///
+        /// #
         /// # let bob_identity = TestIdentity::new(&issuer, |id| {
         /// #     Subject::from_json_value(json!({
         /// #       "id": id.as_str(),
@@ -355,8 +408,8 @@ mod signing {
         /// let bob_signer = Arc::new(bob_identity);
         ///
         /// let sign_file = pipeline.sign_with_all(vec![
-        ///     Box::new(sign::IntervalController::build(alice_signer, 100)),
-        ///     Box::new(sign::IntervalController::build(bob_signer, 100)),
+        ///     Box::new(sign::IntervalController::build(alice_signer, Duration::from_millis(100))),
+        ///     Box::new(sign::IntervalController::build(bob_signer, Duration::from_millis(100))),
         /// ])
         ///     .expect("Failed to start stream")
         ///     .try_collect::<SignFile>()
@@ -364,7 +417,7 @@ mod signing {
         ///     .expect("Failed to look at frame");
         ///
         /// sign_file.write("./my_signatures.ssrt").expect("Failed to write signfile");
-        ///
+        /// #
         /// # Ok(())
         /// # }
         /// ```
@@ -394,18 +447,18 @@ mod signing {
         /// #     issuer::TestIssuer,
         /// #     test_video, videos,
         /// # };
-        ///
         /// #
         /// # #[tokio::main]
         /// # async fn main() -> Result<(), Box<dyn Error>> {
         /// use std::sync::Arc;
+        /// use std::time::Duration;
         /// use stream_signer::{video::{ChunkSigner, Signer}, SignPipeline, SignFile, TryStreamExt};
         ///
         /// stream_signer::gst::init()?;
-        ///
+        /// #
         /// # let client = get_client();
         /// # let issuer = TestIssuer::new(client.clone()).await?;
-        ///
+        /// #
         /// # let identity = TestIdentity::new(&issuer, |id| {
         /// #     Subject::from_json_value(json!({
         /// #       "id": id.as_str(),
@@ -426,9 +479,9 @@ mod signing {
         /// let mut is_first = true;
         /// let sign_file = pipeline.sign(move |info| {
         ///   // ...
-        ///   if !info.time.is_start() && info.time.multiple_of(100) {
+        ///   if !info.time.is_start() && info.time.multiple_of(Duration::from_millis(100)) {
         ///     let res = vec![
-        ///       ChunkSigner::new(info.time.start() - 100, signer.clone(), None, is_first),
+        ///       ChunkSigner::new(info.time.start() - Duration::from_millis(100), signer.clone(), None, is_first),
         ///     ];
         ///     is_first = false;
         ///     res

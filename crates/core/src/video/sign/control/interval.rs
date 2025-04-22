@@ -5,6 +5,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
+    time::Duration,
 };
 
 use futures::{future::BoxFuture, FutureExt};
@@ -49,6 +50,7 @@ pub struct Embedding {
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn Error>> {
 /// use std::sync::Arc;
+/// use std::time::Duration;
 /// use stream_signer::{video::{sign, Signer}, SignPipeline, SignFile, TryStreamExt};
 ///
 /// stream_signer::gst::init()?;
@@ -73,7 +75,7 @@ pub struct Embedding {
 ///
 /// let signer = Arc::new(identity);
 ///
-/// let controller = sign::IntervalController::build(signer, 100);
+/// let controller = sign::IntervalController::build(signer, Duration::from_millis(100));
 ///
 /// let sign_file = pipeline.sign_with(controller)
 ///     .expect("Failed to start stream")
@@ -82,7 +84,7 @@ pub struct Embedding {
 ///     .expect("Failed to look at frame");
 ///
 /// sign_file.write("./my_signatures.ssrt").expect("Failed to write signfile");
-///
+/// #
 /// # Ok(())
 /// # }
 /// ```
@@ -100,20 +102,20 @@ pub struct IntervalController<S: Signer> {
     pub signer: Arc<S>,
     /// The length or size of the chunks, this should be between
     /// [crate::spec::MAX_CHUNK_LENGTH] and [crate::spec::MIN_CHUNK_LENGTH]
-    pub interval: Timestamp,
+    pub interval: Duration,
 
     /// Whether this the first signature used when signing
     is_start: AtomicBool,
 }
 
 impl<S: Signer> IntervalController<S> {
-    pub fn build<T: Into<Timestamp>>(signer: Arc<S>, interval: T) -> Self {
+    pub fn build(signer: Arc<S>, interval: Duration) -> Self {
         Self {
             embedding: None,
             range: None,
             channels: None,
             signer,
-            interval: interval.into(),
+            interval,
             is_start: true.into(),
         }
     }
@@ -168,15 +170,25 @@ impl<S: Signer + 'static> SingleController<S> for IntervalController<S> {
 
         future::ready({
             if !time.is_start() && (time % self.interval).is_first() {
+                let start = state
+                    .time
+                    .start()
+                    .checked_sub(self.interval)
+                    .unwrap_or_default()
+                    .into();
+
+                println!("Start: {start:.2?} -> {:.2?}", time.start());
+
                 let mut res = ChunkSigner::new(
-                    state.time.start() - self.interval,
+                    start,
                     self.signer.clone(),
                     None,
                     !self.is_start.load(Ordering::Relaxed),
                 );
 
                 if let Some(emb) = &self.embedding {
-                    res = res.with_embedding(emb.pos, emb.size)
+                    res = res.with_embedding(emb.pos, emb.size);
+                    println!("With embedding: {emb:?}");
                 }
 
                 self.is_start.store(true, Ordering::Relaxed);

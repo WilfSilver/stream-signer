@@ -1,10 +1,12 @@
 // TODO:
 // - Sign video then verify it as an embedding in another video
 
+mod constants;
 mod utils;
 
 use std::{error::Error, sync::Arc};
 
+use constants::ONE_HUNDRED_MILLIS;
 use futures::{StreamExt, TryStreamExt};
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use serde_json::json;
@@ -28,7 +30,7 @@ use utils::{sign_and_verify_int, skip_loading};
 #[tokio::test]
 async fn sign_and_verify_embedding() -> Result<(), Box<dyn Error>> {
     sign_and_verify_int(|i| {
-        sign::IntervalController::build(i, 100)
+        sign::IntervalController::build(i, ONE_HUNDRED_MILLIS)
             .with_embedding(Vec2u::new(10, 10), Vec2u::new(100, 100))
     })
     .await
@@ -65,7 +67,7 @@ async fn sign_with_too_large_embedding() -> Result<(), Box<dyn Error>> {
     {
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
-        let ctrl = sign::IntervalController::build(identity.clone(), 100)
+        let ctrl = sign::IntervalController::build(identity.clone(), ONE_HUNDRED_MILLIS)
             .with_embedding(Vec2u::new(0, 0), size);
 
         let res = pipe.sign_with(ctrl)?.try_collect::<SignFile>().await;
@@ -115,7 +117,7 @@ async fn sign_with_too_small_embedding() -> Result<(), Box<dyn Error>> {
     for size in [(0, 50), (50, 0), (0, 0)].into_iter().map(Vec2u::from) {
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
-        let ctrl = sign::IntervalController::build(identity.clone(), 100)
+        let ctrl = sign::IntervalController::build(identity.clone(), ONE_HUNDRED_MILLIS)
             .with_embedding(Vec2u::new(0, 0), size);
 
         let res = pipe.sign_with(ctrl)?.try_collect::<SignFile>().await;
@@ -167,7 +169,7 @@ async fn sign_with_too_large_position() -> Result<(), Box<dyn Error>> {
     {
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
-        let ctrl = sign::IntervalController::build(identity.clone(), 100)
+        let ctrl = sign::IntervalController::build(identity.clone(), ONE_HUNDRED_MILLIS)
             .with_embedding(pos, Vec2u::new(1, 1));
 
         let res = pipe.sign_with(ctrl)?.try_collect::<SignFile>().await;
@@ -215,7 +217,10 @@ async fn verify_with_invalid_embedding() -> Result<(), Box<dyn Error>> {
     let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
     let signs = pipe
-        .sign_with(sign::IntervalController::build(Arc::new(identity), 100))?
+        .sign_with(sign::IntervalController::build(
+            Arc::new(identity),
+            ONE_HUNDRED_MILLIS,
+        ))?
         .try_collect::<Vec<_>>()
         .await?;
 
@@ -313,7 +318,10 @@ async fn verify_with_invalid_pos() -> Result<(), Box<dyn Error>> {
     let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
     let signs = pipe
-        .sign_with(sign::IntervalController::build(Arc::new(identity), 100))?
+        .sign_with(sign::IntervalController::build(
+            Arc::new(identity),
+            ONE_HUNDRED_MILLIS,
+        ))?
         .try_collect::<Vec<_>>()
         .await?;
 

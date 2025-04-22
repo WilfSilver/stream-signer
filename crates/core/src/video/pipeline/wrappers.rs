@@ -2,10 +2,10 @@
 
 use gst::{
     prelude::{ElementExt, ElementExtManual},
-    ClockTime, CoreError, SeekFlags, StateChangeSuccess,
+    CoreError, SeekFlags, StateChangeSuccess,
 };
 
-use crate::video::utils::get_bus_errors;
+use crate::{file::Timestamp, video::utils::get_bus_errors};
 
 pub trait SetState {
     fn set_state_blocking(&self, new_state: gst::State) -> Result<(), glib::Error>;
@@ -93,13 +93,11 @@ impl Pipeline {
     /// Seek to the given position in the file, passing the 'accurate' flag to gstreamer.
     /// If you want to make large jumps in a video file this may be faster than setting a
     /// very low framerate (because with a low framerate, gstreamer still decodes every frame).
-    pub fn seek_accurate(&self, time: f64) -> Result<(), glib::Error> {
-        let time_ns_f64 = time * ClockTime::SECOND.nseconds() as f64;
-        let time_ns_u64 = time_ns_f64 as u64;
+    pub fn seek_accurate(&self, time: Timestamp) -> Result<(), glib::Error> {
         let flags = SeekFlags::ACCURATE.union(SeekFlags::FLUSH);
 
         self.raw()
-            .seek_simple(flags, gst::ClockTime::from_nseconds(time_ns_u64))
+            .seek_simple(flags, gst::ClockTime::from_nseconds(time.as_nanos() as u64))
             .map_err(|e| glib::Error::new(CoreError::TooLazy, &e.message))
     }
 }

@@ -1,11 +1,14 @@
+mod constants;
 mod utils;
 
 use std::{error::Error, sync::Arc};
 
+use constants::ONE_HUNDRED_MILLIS;
 use futures::{StreamExt, TryStreamExt};
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use serde_json::json;
 use stream_signer::{
+    time::Timestamp,
     video::{sign, verify::SignatureState},
     SignFile, SignPipeline,
 };
@@ -43,9 +46,9 @@ async fn sign_and_verify_with_range() -> Result<(), Box<dyn Error>> {
 
     let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
-    let range = 105.into()..110.into();
-    let controller =
-        sign::IntervalController::build(Arc::new(identity), 100).with_range(range.clone());
+    let range = Timestamp::from_millis(105)..Timestamp::from_millis(110);
+    let controller = sign::IntervalController::build(Arc::new(identity), ONE_HUNDRED_MILLIS)
+        .with_range(range.clone());
 
     let signfile = pipe
         .sign_with(controller)?
@@ -91,3 +94,5 @@ async fn sign_and_verify_with_range() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
+// TODO: Use all other controllers

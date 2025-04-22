@@ -46,7 +46,7 @@ impl AppDelegate<AppData> for Delegate {
             if let Some(path) = file_info.path().to_str() {
                 data.video.options.output = path.into();
             } else {
-                println!("Failed to open save location");
+                eprintln!("Failed to open save location");
             }
             return Handled::Yes;
         }
@@ -54,7 +54,7 @@ impl AppDelegate<AppData> for Delegate {
             if let Some(path) = file_info.path().to_str() {
                 data.video.options.src = path.to_string(); //format!("file://{}", path);
             } else {
-                println!("Failed to open file");
+                eprintln!("Failed to open file");
             }
             return Handled::Yes;
         }

@@ -98,8 +98,8 @@ where
 }
 
 pub async fn sign_and_verify_multi(
-    alice_chunk_size: u32,
-    bob_chunk_size: u32,
+    alice_chunk_size: Duration,
+    bob_chunk_size: Duration,
 ) -> Result<(), Box<dyn Error>> {
     gst::init()?;
 
@@ -195,8 +195,8 @@ pub async fn sign_and_verify_multi(
 }
 
 pub async fn sign_and_verify_multi_together(
-    alice_chunk_size: u32,
-    bob_chunk_size: u32,
+    alice_chunk_size: Duration,
+    bob_chunk_size: Duration,
 ) -> Result<(), Box<dyn Error>> {
     gst::init()?;
 

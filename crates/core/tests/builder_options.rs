@@ -1,11 +1,14 @@
+mod constants;
 mod utils;
 
 use std::{error::Error, sync::Arc};
 
+use constants::ONE_HUNDRED_MILLIS;
 use futures::{StreamExt, TryStreamExt};
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use serde_json::json;
 use stream_signer::{
+    time::Timestamp,
     video::{
         sign,
         verify::{InvalidSignatureError, SignatureState},
@@ -45,19 +48,23 @@ async fn sign_and_verify_with_start_offset() -> Result<(), Box<dyn Error>> {
 
     let filepath = test_video(videos::BIG_BUNNY);
 
+    let start = Timestamp::from_secs(2);
     let pipe = SignPipeline::build_from_path(&filepath)
         .unwrap()
-        .with_start_offset(2.)
+        .with_start_offset(start)
         .build()?;
 
     let signfile = pipe
-        .sign_with(sign::IntervalController::build(Arc::new(identity), 100))?
+        .sign_with(sign::IntervalController::build(
+            Arc::new(identity),
+            ONE_HUNDRED_MILLIS,
+        ))?
         .try_collect::<SignFile>()
         .await?;
 
     let pipe = SignPipeline::build_from_path(&filepath)
         .unwrap()
-        .with_start_offset(2.)
+        .with_start_offset(start)
         .build()?;
 
     let mut count = 0;
@@ -118,11 +125,14 @@ async fn sign_with_start_offset() -> Result<(), Box<dyn Error>> {
 
     let pipe = SignPipeline::build_from_path(&filepath)
         .unwrap()
-        .with_start_offset(2.)
+        .with_start_offset(Timestamp::from_secs(2))
         .build()?;
 
     let signfile = pipe
-        .sign_with(sign::IntervalController::build(Arc::new(identity), 100))?
+        .sign_with(sign::IntervalController::build(
+            Arc::new(identity),
+            ONE_HUNDRED_MILLIS,
+        ))?
         .try_collect::<SignFile>()
         .await?;
 
@@ -187,13 +197,16 @@ async fn sign_and_verify_with_diff_start_offset() -> Result<(), Box<dyn Error>> 
     let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
     let signfile = pipe
-        .sign_with(sign::IntervalController::build(Arc::new(identity), 100))?
+        .sign_with(sign::IntervalController::build(
+            Arc::new(identity),
+            ONE_HUNDRED_MILLIS,
+        ))?
         .try_collect::<SignFile>()
         .await?;
 
     let pipe = SignPipeline::build_from_path(&filepath)
         .unwrap()
-        .with_start_offset(2.05) // Specifically to break the 100ms chunks
+        .with_start_offset(Timestamp::from_secs_f64(2.05)) // Specifically to break the 100ms chunks
         .build()?;
 
     let mut count = 0;
@@ -210,7 +223,7 @@ async fn sign_and_verify_with_diff_start_offset() -> Result<(), Box<dyn Error>> 
 
                 async move {
                     let time = v.state.frame.get_timestamp();
-                    let expected_invalid = time < (2.1 * 1_000_000_000.) as u64;
+                    let expected_invalid = time < Timestamp::from_secs_f64(2.1);
 
                     for s in &v.sigs {
                         if skip_loading(s).await {

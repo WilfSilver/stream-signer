@@ -30,6 +30,7 @@ use super::Controller;
 /// # #[tokio::main]
 /// # async fn main() -> Result<(), Box<dyn Error>> {
 /// use std::sync::Arc;
+/// use std::time::Duration;
 /// use stream_signer::{video::{sign, ChunkSigner, Signer}, SignPipeline, SignFile, TryStreamExt};
 ///
 /// stream_signer::gst::init()?;
@@ -55,9 +56,9 @@ use super::Controller;
 /// let signer = Arc::new(identity);
 ///
 /// let controller = sign::FnController(move |state| {
-///   if !state.time.is_start() && state.time.multiple_of(100) {
+///   if !state.time.is_start() && state.time.multiple_of(Duration::from_millis(100)) {
 ///     let res = vec![
-///       ChunkSigner::new(state.time.start() - 100, signer.clone(), None, false),
+///       ChunkSigner::new(state.time.start() - Duration::from_millis(100), signer.clone(), None, false),
 ///     ];
 ///     res
 ///   } else {
@@ -126,6 +127,7 @@ where
 /// # async fn main() -> Result<(), Box<dyn Error>> {
 /// use futures::future;
 /// use std::sync::Arc;
+/// use std::time::Duration;
 /// use stream_signer::{video::{sign, ChunkSigner, Signer}, SignPipeline, SignFile, TryStreamExt};
 ///
 /// stream_signer::gst::init()?;
@@ -153,9 +155,9 @@ where
 /// let controller = sign::AsyncFnController(move |state| {
 ///   let signer = signer.clone();
 ///   async move {
-///     if !state.time.is_start() && state.time.multiple_of(100) {
+///     if !state.time.is_start() && state.time.multiple_of(Duration::from_millis(100)) {
 ///       let res = vec![
-///         ChunkSigner::new(state.time.start() - 100, signer.clone(), None, false),
+///         ChunkSigner::new(state.time.start() - Duration::from_millis(100), signer.clone(), None, false),
 ///       ];
 ///
 ///       // ... await ...
@@ -232,6 +234,7 @@ where
 /// # async fn main() -> Result<(), Box<dyn Error>> {
 /// use futures::future;
 /// use std::sync::Arc;
+/// use std::time::Duration;
 /// use stream_signer::{video::{sign, ChunkSigner, Signer}, SignPipeline, SignFile, TryStreamExt};
 ///
 /// stream_signer::gst::init()?;
@@ -258,9 +261,9 @@ where
 ///
 /// let mut is_first = true;
 /// let controller = sign::FnMutController::new(move |state| {
-///   if !state.time.is_start() && state.time.multiple_of(100) {
+///   if !state.time.is_start() && state.time.multiple_of(Duration::from_millis(100)) {
 ///     let res = vec![
-///       ChunkSigner::new(state.time.start() - 100, signer.clone(), None, is_first),
+///       ChunkSigner::new(state.time.start() - Duration::from_millis(100), signer.clone(), None, is_first),
 ///     ];
 ///     is_first = false;
 ///

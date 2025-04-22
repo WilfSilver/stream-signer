@@ -1,7 +1,9 @@
+mod constants;
 mod utils;
 
-use std::{error::Error, sync::Arc};
+use std::{error::Error, sync::Arc, time::Duration};
 
+use constants::ONE_HUNDRED_MILLIS;
 use futures::{StreamExt, TryStreamExt};
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use serde_json::json;
@@ -21,6 +23,8 @@ use testlibs::{
     test_video, videos,
 };
 use utils::skip_loading;
+
+const ONE_MILLI: Duration = Duration::from_millis(1);
 
 #[tokio::test]
 async fn sign_too_large_chunk() -> Result<(), Box<dyn Error>> {
@@ -47,24 +51,21 @@ async fn sign_too_large_chunk() -> Result<(), Box<dyn Error>> {
 
     let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
+    let length = MAX_CHUNK_LENGTH + ONE_MILLI;
+
     let res = pipe
-        .sign_with(sign::IntervalController::build(
-            Arc::new(identity),
-            MAX_CHUNK_LENGTH as u32 + 1,
-        ))?
+        .sign_with(sign::IntervalController::build(Arc::new(identity), length))?
         .try_collect::<Vec<_>>()
         .await;
-
-    const LENGTH: usize = MAX_CHUNK_LENGTH + 1;
 
     assert!(
         matches!(
             res,
             Err(SigningError::Operation(
-                SigOperationError::InvalidChunkSize(LENGTH)
-            ))
+                SigOperationError::InvalidChunkSize(l)
+            )) if l == length
         ),
-        "{:?} reported invalid chunk size of {LENGTH}",
+        "{:?} reported invalid chunk size of {length:.2?}",
         res.map(|mut v| v.pop())
     );
 
@@ -96,12 +97,12 @@ async fn sign_too_small_chunk() -> Result<(), Box<dyn Error>> {
 
     let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
+    const LENGTH: Duration = Duration::from_millis(4);
+
     let res = pipe
-        .sign_with(sign::IntervalController::build(Arc::new(identity), 4))?
+        .sign_with(sign::IntervalController::build(Arc::new(identity), LENGTH))?
         .try_collect::<Vec<_>>()
         .await;
-
-    const LENGTH: usize = 4;
 
     assert!(
         matches!(
@@ -110,7 +111,7 @@ async fn sign_too_small_chunk() -> Result<(), Box<dyn Error>> {
                 SigOperationError::InvalidChunkSize(LENGTH)
             ))
         ),
-        "{:?} reported an invalid chunk size of {LENGTH}",
+        "{:?} reported an invalid chunk size of {LENGTH:?}",
         res.map(|mut v| v.pop())
     );
 
@@ -144,18 +145,21 @@ async fn verify_with_invalid_chunk_length() -> Result<(), Box<dyn Error>> {
     let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
     let signs = pipe
-        .sign_with(sign::IntervalController::build(Arc::new(identity), 100))?
+        .sign_with(sign::IntervalController::build(
+            Arc::new(identity),
+            ONE_HUNDRED_MILLIS,
+        ))?
         .try_collect::<Vec<_>>()
         .await?;
 
-    for length in [MIN_CHUNK_LENGTH - 1, MAX_CHUNK_LENGTH + 1] {
+    for length in [MIN_CHUNK_LENGTH - ONE_MILLI, MAX_CHUNK_LENGTH + ONE_MILLI] {
         // Secretly just change the length as technically we won't get to the
         // verification stage
         let signfile = signs
             .iter()
             .cloned()
             .map(|mut i| {
-                i.stop = i.start + length as u32;
+                i.stop = i.start + length.as_millis() as u32;
                 i
             })
             .collect::<SignFile>();
@@ -191,7 +195,7 @@ async fn verify_with_invalid_chunk_length() -> Result<(), Box<dyn Error>> {
                                     ),
                                 ) if *elength == length
                             ),
-                            "{s:?} marks itself as an invalid chunk length with length {length}ms"
+                            "{s:?} marks itself as an invalid chunk length with length {length:.2?}"
                         );
                     }
                 }
