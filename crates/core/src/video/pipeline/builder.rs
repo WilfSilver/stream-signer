@@ -30,9 +30,124 @@ pub type BuilderError = glib::BoolError;
 
 /// Enables building, signing and verifying videos
 ///
-/// For examples, please see [SignPipeline]
+/// ## Examples
 ///
-/// TODO: Examples
+/// ### Build a video from a URL
+///
+/// Using a URL as the source of the URL is fully supported as `uridecodebin`
+/// is used as the src element.
+///
+/// ```no_run
+/// use stream_signer::{video::pipeline::FramerateOption, SignPipeline};
+///
+/// let res = SignPipeline::build("https://example.com/my_video.mp4")
+///     .unwrap()
+///     .with_frame_rate(FramerateOption::Auto)
+///     .build();
+///
+/// assert_ok(res.is_ok());
+/// ```
+///
+/// ### Build a video with automatic framerate
+///
+/// By default the program will try to iterate over every frame as fast as
+/// possible. This instead uses inbuilt GStreamer logic to pace the frames as
+/// a user or video player will expect e.g. 30fps.
+///
+/// ```
+/// # use testlibs::{test_video, videos}
+/// use stream_signer::{video::pipeline::FramerateOption, SignPipeline};
+///
+/// # let my_video_path = test_video(videos::BIG_BUNNY);
+/// let res = SignPipeline::build_from_path(&my_video_path)
+///     .unwrap()
+///     .with_frame_rate(FramerateOption::Auto)
+///     .build();
+///
+/// assert_ok(res.is_ok());
+/// ```
+///
+/// ### Build a video that consumes the video as fast as possible
+///
+/// ```
+/// # use testlibs::{test_video, videos}
+/// use stream_signer::SignPipeline;
+///
+/// # let my_video_path = test_video(videos::BIG_BUNNY);
+/// let res = SignPipeline::build_from_path(&my_video_path)
+///     .unwrap()
+///     .build();
+///
+/// assert_ok(res.is_ok());
+/// ```
+///
+/// ### Start at a given point within the video
+///
+/// This is fully supported and tested, however note that if you are doing this
+/// for verification any chunk that is interrupted (meaning it doesn't have
+/// the full data for), it will show as invalid due to this using GStreamer in
+/// the backend.
+///
+/// This example starts the video at the 2 second mark.
+///
+/// ```
+/// # use testlibs::{test_video, videos}
+/// use stream_signer::SignPipeline;
+///
+/// # let my_video_path = test_video(videos::BIG_BUNNY);
+/// let res = SignPipeline::build_from_path(&my_video_path)
+///     .unwrap()
+///     .with_start_offset(Timestamp::from_secs(2))
+///     .build();
+///
+/// assert_ok(res.is_ok());
+/// ```
+///
+/// ### Build a video with a custom sink name
+///
+/// ```
+/// # use testlibs::{test_video, videos}
+/// use stream_signer::SignPipeline;
+///
+/// # let my_video_path = test_video(videos::BIG_BUNNY);
+/// let res = SignPipeline::build_from_path(&my_video_path)
+///     .unwrap()
+///     .with_video_sink_name("my_video_sink")
+///     .with_audio_sink_name("my_audio_sink")
+///     .build();
+///
+/// assert_ok(res.is_ok());
+/// ```
+///
+/// ### Build a video with custom number of audio channels
+///
+/// Please note that any changes to the audio will only be applied if an audio
+/// pad is detected.
+///
+/// ```
+/// # use testlibs::{test_video, videos}
+/// use stream_signer::SignPipeline;
+///
+/// # let my_video_path = test_video(videos::BIG_BUNNY);
+/// let res = SignPipeline::build_from_path(&my_video_path)
+///     .unwrap()
+///     .with_audio_channels(4)
+///     .build();
+///
+/// assert_ok(res.is_ok());
+/// ```
+///
+/// ## Pipeline Created
+///
+/// The pipeline created looks as follows:
+///
+/// ```txt
+/// src -> video_convert -> video_sink caps=video_caps
+///    \-> audio_convert -> audio_sink caps=audio_caps
+/// ```
+///
+/// The audio pipeline is only added if audio is detected within the video.
+///
 pub struct SignPipelineBuilder<'a> {
     /// The source element, which is by default a `uridecodebin`
     pub src: ElementBuilder<'a>,
@@ -148,7 +263,7 @@ impl SignPipelineBuilder<'_> {
 
     /// Converts this object into a [Pipeline] with the sink name it is using
     /// for the frames
-    fn build_raw_pipeline(self) -> Result<PipeInitiator, BuilderError> {
+    pub fn build_raw_pipeline(self) -> Result<PipeInitiator, BuilderError> {
         // Create the pipeline and add elements
         let pipe = gst::Pipeline::new();
         let src = self.src.build()?;

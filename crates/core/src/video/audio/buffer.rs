@@ -17,7 +17,46 @@ use super::AudioSlice;
 /// This then can be used to produce an [AudioSlice] which can be seen as a
 /// slice over the different audio buffers which relate to the set frame.
 ///
-// TODO: Examples
+/// ```norun
+/// # use std::error::Error;
+/// # fn main() -> Result<(), Box<dyn Error>> {
+/// use stream_signer::{
+///     video::{
+///         audio::{AudioBuffer, AudioSlice},
+///         Frame, PipeState,
+///     },
+///     SignPipeline,
+/// };
+///
+/// let init = SignPipeline::build("https://example.com/video.mp4")
+///     .build_raw_pipeline()?;
+///
+/// let state = PipeState::new(init, ());
+/// let audio_buffer = AudioBuffer;
+///
+/// let sample = state.get_video_sink().try_pull_sample(gst::ClockTime::SECOND);
+/// let frame: Frame = sample.into();
+/// let end_timestamp = frame.get_end_timestamp();
+///
+/// let audio_sink = state.get_audio_sink();
+/// if let Some(audio_sink) = audio_sink {
+///     if !audio_sink.is_eos() {
+///         while audio_buffer.get_end_timestamp() < end_timestamp {
+///             let sample = audio_sink.try_pull_sample(gst::ClockTime::SECOND);
+///             match sample {
+///                 Some(sample) => audio_buffer.add_sample(sample),
+///                 None => break, // Reached end of video
+///             }
+///         }
+///     }
+/// }
+///
+/// let audio_slice: Option<AudioSlice> = audio_buffer.pop_next_frame(frame.fps());
+/// // ...
+/// #
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug, Default, Clone)]
 pub struct AudioBuffer {
     /// The raw vector of buffers

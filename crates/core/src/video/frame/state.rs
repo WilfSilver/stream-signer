@@ -9,11 +9,10 @@ use crate::{
 use super::Frame;
 
 /// An interface to make it easier interacting with the [Frame] and other
-/// aspects of the video (without having the bloated contexts)
+/// aspects of the video
 ///
 /// Note this is slightly different to [crate::video::manager::FrameManager], as
-/// that is more focused on being a nice interface to interact with (and also
-/// we don't need the specific context for this frame)
+/// that is more focused on internally used tools when signing or verifying
 ///
 /// TODO: Examples
 #[derive(Debug, Clone)]

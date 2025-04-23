@@ -106,7 +106,52 @@ impl<T> Unpin for DelayBuffer<T> {}
 /// At the end, the buffer will be consumed and all elements will be returned
 /// from it
 ///
-/// TODO: Come up with actually good example of why people should use it
+/// ## Example
+///
+/// ```
+/// use std::time::Duration;
+///
+/// use futures::{stream, StreamExt};
+/// use tokio::{pin, time::sleep};
+///
+/// use stream_signer::utils::DelayedStream;
+///
+/// # #[tokio::main]
+/// # async fn main() {
+/// let mut i = 0;
+/// let stream = stream::repeat_with(|| {
+///     i += 1;
+///     i
+/// })
+/// .take(100)
+/// .then(|i| async move {
+///     sleep(Duration::from_millis(25)).await;
+///     i
+/// });
+///
+/// const LEN: usize = 10;
+///
+/// let delayed = DelayedStream::<_, _>::new(LEN, stream);
+///
+/// let filtered = delayed.filter_map(|a| async move {
+///     match a {
+///         super::Delayed::Partial(_) => None,
+///         super::Delayed::Full(init, fut) => Some((init, fut)),
+///     }
+/// });
+///
+/// pin!(filtered);
+///
+/// let mut i = 0;
+/// while let Some(thing) = filtered.next().await {
+///     i += 1;
+///     assert_eq!(*thing.0, i);
+///     for (j, v) in thing.1.iter().enumerate() {
+///         assert_eq!(**v, i + j + 1)
+///     }
+/// }
+/// # }
+/// ```
 #[pin_project]
 pub struct DelayedStream<T, Src>
 where
@@ -167,53 +212,6 @@ where
                 Poll::Ready(latest)
             }
             Poll::Pending => Poll::Pending,
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    use futures::{stream, StreamExt};
-    use tokio::{pin, time::sleep};
-
-    use super::DelayedStream;
-
-    #[tokio::test]
-    async fn test_queue() {
-        let mut i = 0;
-        let stream = stream::repeat_with(|| {
-            i += 1;
-            i
-        })
-        .take(100)
-        .then(|i| async move {
-            sleep(Duration::from_millis(25)).await;
-            i
-        });
-
-        const LEN: usize = 10;
-
-        let delayed = DelayedStream::<_, _>::new(LEN, stream);
-
-        let filtered = delayed.filter_map(|a| async move {
-            match a {
-                super::Delayed::Partial(_) => None,
-                super::Delayed::Full(init, fut) => Some((init, fut)),
-            }
-        });
-
-        pin!(filtered);
-
-        let mut i = 0;
-        while let Some(thing) = filtered.next().await {
-            println!("Thing {:?}", thing);
-            i += 1;
-            assert_eq!(*thing.0, i);
-            for (j, v) in thing.1.iter().enumerate() {
-                assert_eq!(**v, i + j + 1)
-            }
         }
     }
 }

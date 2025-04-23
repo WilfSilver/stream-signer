@@ -164,8 +164,6 @@ Each timeframe of the subtitles file will contain a JSON-LD object which describ
 the id of the credentials which generated the signature as well as the pixel
 area which has been signed. This object should look as such:
 
-<!-- TODO: This may need to be updated to another more efficient dataformat -->
-
 ```json
   // An array of Signature objects
 {
@@ -221,7 +219,6 @@ area which has been signed. This object should look as such:
         PAYuNzVBAh4vGHSrQyHUdBBPM"
     }
   },
-  // TODO: Look into if the signature should have more information
   "signature": "..." // The signature itself in Base64
 }
 ```
