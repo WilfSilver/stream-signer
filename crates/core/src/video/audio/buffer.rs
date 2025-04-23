@@ -17,24 +17,28 @@ use super::AudioSlice;
 /// This then can be used to produce an [AudioSlice] which can be seen as a
 /// slice over the different audio buffers which relate to the set frame.
 ///
-/// ```norun
+/// ```no_run
 /// # use std::error::Error;
 /// # fn main() -> Result<(), Box<dyn Error>> {
 /// use stream_signer::{
 ///     video::{
 ///         audio::{AudioBuffer, AudioSlice},
-///         Frame, PipeState,
+///         manager::PipeState,
+///         Frame,
 ///     },
 ///     SignPipeline,
 /// };
+/// # use testlibs::{test_video, videos};
+/// # let my_video_with_audio = test_video(videos::BIG_BUNNY_LONG);
 ///
-/// let init = SignPipeline::build("https://example.com/video.mp4")
+/// let init = SignPipeline::build_from_path(&my_video_with_audio)
+///     .unwrap()
 ///     .build_raw_pipeline()?;
 ///
-/// let state = PipeState::new(init, ());
-/// let audio_buffer = AudioBuffer;
+/// let state = PipeState::new(init, ())?;
+/// let mut audio_buffer = AudioBuffer::default();
 ///
-/// let sample = state.get_video_sink().try_pull_sample(gst::ClockTime::SECOND);
+/// let sample = state.get_video_sink().try_pull_sample(gst::ClockTime::SECOND).unwrap();
 /// let frame: Frame = sample.into();
 /// let end_timestamp = frame.get_end_timestamp();
 ///
@@ -52,6 +56,15 @@ use super::AudioSlice;
 /// }
 ///
 /// let audio_slice: Option<AudioSlice> = audio_buffer.pop_next_frame(frame.fps());
+///
+/// assert!(audio_slice.is_some());
+///
+/// let audio_slice = audio_slice.unwrap();
+///
+/// // The timestamp range is equal to the framerate (in this case it is 30fps)
+/// assert_eq!(audio_slice.get_timestamp().as_millis(), 0);
+/// assert_eq!(audio_slice.get_end_timestamp().as_millis(), 33);
+///
 /// // ...
 /// #
 /// # Ok(())
@@ -213,4 +226,109 @@ impl From<gst::Sample> for AudioBuffer {
 #[inline]
 pub(crate) fn rate_to_duration(rate: u32) -> Duration {
     Duration::from_secs_f64(1. / rate as f64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::{
+        video::{manager::PipeState, Frame},
+        SignPipeline,
+    };
+
+    use std::error::Error;
+
+    use testlibs::{test_video, videos};
+
+    #[test]
+    fn timestamps_match() -> Result<(), Box<dyn Error>> {
+        let filepath = test_video(videos::BIG_BUNNY_LONG);
+
+        let init = SignPipeline::build_from_path(&filepath)
+            .unwrap()
+            .build_raw_pipeline()?;
+
+        let state = PipeState::new(init, ())?;
+        let mut audio_buffer = AudioBuffer::default();
+
+        while let Some(sample) = state
+            .get_video_sink()
+            .try_pull_sample(gst::ClockTime::SECOND)
+        {
+            let frame: Frame = sample.into();
+            let end_timestamp = frame.get_end_timestamp();
+
+            let audio_sink = state.get_audio_sink();
+            if let Some(audio_sink) = audio_sink {
+                if !audio_sink.is_eos() {
+                    while audio_buffer.get_end_timestamp() < end_timestamp {
+                        let sample = audio_sink.try_pull_sample(gst::ClockTime::SECOND);
+                        match sample {
+                            Some(sample) => audio_buffer.add_sample(sample),
+                            None => break, // Reached end of video
+                        }
+                    }
+                }
+            }
+
+            // This also checks that we will always get a audio slice for all
+            // frames
+            let audio_slice = audio_buffer.pop_next_frame(frame.fps()).unwrap();
+
+            let expected_start = frame.get_timestamp();
+            let expected_end = frame.get_end_timestamp();
+            assert_eq!(
+                audio_slice.get_timestamp(),
+                expected_start,
+                "Starting timestamp is {expected_start:.2?}",
+            );
+            assert_eq!(
+                audio_slice.get_end_timestamp(),
+                expected_end,
+                "Ending timestamp is {expected_end:.2?}",
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn channels_detected() -> Result<(), Box<dyn Error>> {
+        let filepath = test_video(videos::BIG_BUNNY_LONG);
+
+        let init = SignPipeline::build_from_path(&filepath)
+            .unwrap()
+            .build_raw_pipeline()?;
+
+        let state = PipeState::new(init, ())?;
+        let mut audio_buffer = AudioBuffer::default();
+
+        let sample = state
+            .get_video_sink()
+            .try_pull_sample(gst::ClockTime::SECOND)
+            .unwrap();
+
+        let frame: Frame = sample.into();
+        let end_timestamp = frame.get_end_timestamp();
+
+        let audio_sink = state.get_audio_sink();
+        if let Some(audio_sink) = audio_sink {
+            if !audio_sink.is_eos() {
+                while audio_buffer.get_end_timestamp() < end_timestamp {
+                    let sample = audio_sink.try_pull_sample(gst::ClockTime::SECOND);
+                    match sample {
+                        Some(sample) => audio_buffer.add_sample(sample),
+                        None => break, // Reached end of video
+                    }
+                }
+            }
+        }
+
+        let audio_slice = audio_buffer.pop_next_frame(frame.fps()).unwrap();
+
+        assert_eq!(audio_slice.channels(), 2, "Detected 2 channels");
+
+        Ok(())
+    }
 }

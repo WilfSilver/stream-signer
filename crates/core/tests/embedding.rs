@@ -82,7 +82,7 @@ async fn sign_with_too_large_embedding() -> Result<(), Box<dyn Error>> {
                 ))) if esize == size
             ),
             "{:?} responded as an invalid crop of position {POS:?} and size {size:?}",
-            res.map(|s| s.iter().next())
+            res.map(|s| s.into_iter().next())
         );
     }
 
@@ -131,7 +131,7 @@ async fn sign_with_too_small_embedding() -> Result<(), Box<dyn Error>> {
                 ))) if esize == size
             ),
             "{:?} responded as an invalid crop of position {POS:?} and size {size:?}",
-            res.map(|s| s.iter().next())
+            res.map(|s| s.into_iter().next())
         );
     }
 
@@ -183,7 +183,7 @@ async fn sign_with_too_large_position() -> Result<(), Box<dyn Error>> {
                 ))) if epos == pos
             ),
             "{:?} responded as an invalid crop of position {pos:?} and size {SIZE:?}",
-            res.map(|s| s.iter().next())
+            res.map(|s| s.into_iter().next())
         );
     }
 

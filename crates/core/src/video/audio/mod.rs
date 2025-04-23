@@ -2,7 +2,7 @@
 //! to video frames so that they can be signed correctly
 
 mod buffer;
-mod frame;
+mod slice;
 
 pub use buffer::AudioBuffer;
-pub use frame::AudioSlice;
+pub use slice::AudioSlice;

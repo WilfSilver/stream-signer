@@ -73,12 +73,14 @@ impl Pipeline {
         &self.0
     }
 
-    /// Sets the pipeline to the [gst::State::Paused] state
+    /// Sets the pipeline to the [gst::State::Paused] state, blocking the
+    /// thread until it has changed
     pub fn pause(&self) -> Result<(), glib::Error> {
         self.set_state_blocking(gst::State::Paused)
     }
 
-    /// Sets the pipeline to the [gst::State::Playing] state
+    /// Sets the pipeline to the [gst::State::Playing] state, blocking the
+    /// thread until it has changed
     pub fn play(&self) -> Result<(), glib::Error> {
         self.set_state_blocking(gst::State::Playing)
     }

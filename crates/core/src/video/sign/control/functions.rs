@@ -58,7 +58,7 @@ use super::Controller;
 /// let controller = sign::FnController(move |state| {
 ///   if !state.time.is_start() && state.time.multiple_of(Duration::from_millis(100)) {
 ///     let res = vec![
-///       ChunkSigner::new(state.time.start() - Duration::from_millis(100), signer.clone(), None, false),
+///       ChunkSigner::new(state.time.start() - Duration::from_millis(100), signer.clone()),
 ///     ];
 ///     res
 ///   } else {
@@ -157,7 +157,7 @@ where
 ///   async move {
 ///     if !state.time.is_start() && state.time.multiple_of(Duration::from_millis(100)) {
 ///       let res = vec![
-///         ChunkSigner::new(state.time.start() - Duration::from_millis(100), signer.clone(), None, false),
+///         ChunkSigner::new(state.time.start() - Duration::from_millis(100), signer.clone()),
 ///       ];
 ///
 ///       // ... await ...
@@ -263,7 +263,8 @@ where
 /// let controller = sign::FnMutController::new(move |state| {
 ///   if !state.time.is_start() && state.time.multiple_of(Duration::from_millis(100)) {
 ///     let res = vec![
-///       ChunkSigner::new(state.time.start() - Duration::from_millis(100), signer.clone(), None, is_first),
+///       ChunkSigner::new(state.time.start() - Duration::from_millis(100), signer.clone())
+///         .with_is_ref(!is_first),
 ///     ];
 ///     is_first = false;
 ///
