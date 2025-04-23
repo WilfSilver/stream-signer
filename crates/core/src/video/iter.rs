@@ -149,7 +149,6 @@ impl<VC> Iterator for FrameIter<VC> {
             Some(Ok(sample)) => {
                 let frame: Frame = sample.into();
                 let end_timestamp = frame.get_end_timestamp();
-                // TODO: use sink.is_eos() to pass down if last frame
 
                 if let Some(audio_sink) = audio_sink {
                     if !audio_sink.is_eos() {

@@ -366,7 +366,7 @@ pub mod sign {
     /// Makes it easily create a manager from an iterator, it is done as such
     /// mostly to make it easier to integrate into existing solutions e.g.
     ///
-    /// TODO: Write an example pls
+    /// TODO: Examples
     pub async fn manage<S, C>(
         ((i, (state, frame)), buffer): SigningItem<S, C>,
     ) -> Result<Manager<S, C>, SigningError>
@@ -433,8 +433,10 @@ pub mod sign {
         where
             S: Signer + 'static,
         {
-            // TODO: Checked sub
-            let length = self.timestamp - signer.start;
+            let Some(length) = self.timestamp.checked_sub(*signer.start) else {
+                return Err(SigOperationError::OutOfRange(signer.start, self.timestamp));
+            };
+
             if !CHUNK_LENGTH_RANGE.contains(&length) {
                 return Err(SigOperationError::InvalidChunkSize(length));
             }
@@ -579,7 +581,6 @@ pub mod verification {
             stream::iter(sigs.zip(std::iter::repeat(self))).then(|(chunk, manager)| async move {
                 let cache_key = (
                     chunk.range.start,
-                    // TODO: I don't think this is technically safe
                     chunk.signature.signature.as_ptr() as usize,
                 );
 

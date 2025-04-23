@@ -48,5 +48,3 @@ fn opt_to_vec<T>(o: Option<T>) -> Vec<T> {
         None => Vec::new(),
     }
 }
-
-// TODO: Add a macro

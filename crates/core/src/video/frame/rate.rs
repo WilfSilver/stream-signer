@@ -27,7 +27,23 @@ impl<T> FramerateCompatible for T where
 /// function, for example if you wish outputs as floats you can convert between
 /// them.
 ///
-/// TODO: Examples
+/// ## Examples
+///
+/// If you were wanting to create a 30 fps video it would be as follows:
+///
+/// ```
+/// use stream_signer::video::Framerate;
+///
+/// let fps = Framerate::new(30, 1);
+///
+/// // Note here that the frame time is rounded down to the closest millis as
+/// // we are only getting the millisecond
+/// assert_eq!(fps.frame_time().as_millis(), 33);
+/// assert_eq!(fps.frames(), 30);
+/// assert_eq!(fps.milliseconds(), 1_000); // 1 second as milliseconds
+///
+/// assert_eq!(fps.convert_to_frames(Duration::from_millis(67)), 2);
+/// ```
 #[derive(Debug, Clone, Copy)]
 pub struct Framerate<T>(T, T)
 where
@@ -65,6 +81,16 @@ where
     ///
     /// Due to the underlying times using nanoseconds, there should be little
     /// loss
+    ///
+    /// ```
+    /// use stream_signer::video::Framerate;
+    ///
+    /// let fps = Framerate::new(30, 1);
+    ///
+    /// assert_eq!(fps.convert_to_time(1).as_millis(), 33);
+    /// assert_eq!(fps.convert_to_time(2).as_millis(), 66);
+    /// assert_eq!(fps.convert_to_time(3).as_millis(), 100);
+    /// ```
     #[inline]
     pub fn convert_to_time(&self, frames: usize) -> Timestamp {
         Timestamp::from(self.frame_time() * frames as u32)
@@ -75,6 +101,17 @@ where
     ///
     /// Note if the framerate is over 1000fps, some frames my have the same
     /// timestamp
+    ///
+    /// ```
+    /// use stream_signer::video::Framerate;
+    ///
+    /// let fps = Framerate::new(30, 1);
+    ///
+    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(33)), 0);
+    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(34)), 1);
+    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(67)), 2);
+    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(100)), 3);
+    /// ```
     #[inline]
     pub fn convert_to_frames(&self, duration: Duration) -> usize {
         (duration * <u32 as NumCast>::from(self.frames()).unwrap()
@@ -84,6 +121,30 @@ where
 
     /// This returns the amount of time a frame is expected to be visible for
     /// with the given framerate
+    ///
+    /// For 30 fps:
+    ///
+    /// ```
+    /// use stream_signer::video::Framerate;
+    ///
+    /// let fps = Framerate::new(30, 1);
+    ///
+    /// // Note here that the frame time is rounded down to the closest millis as
+    /// // we are only getting the millisecond
+    /// assert_eq!(fps.frame_time().as_millis(), 33);
+    /// ```
+    ///
+    /// For 60 fps:
+    ///
+    /// ```
+    /// use stream_signer::video::Framerate;
+    ///
+    /// let fps = Framerate::new(60, 1);
+    ///
+    /// // Note here that the frame time is rounded down to the closest millis as
+    /// // we are only getting the millisecond
+    /// assert_eq!(fps.frame_time().as_millis(), 16);
+    /// ```
     pub fn frame_time(&self) -> Duration {
         Duration::from_secs_f64(<f64 as NumCast>::from(self.seconds()).unwrap())
             .div(<u32 as NumCast>::from(self.frames()).unwrap())

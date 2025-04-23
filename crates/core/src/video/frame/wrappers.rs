@@ -13,11 +13,17 @@ use crate::{
 
 use super::{Framerate, ImageFns};
 
-// TODO: Documentation
+/// This is a basic structure used internally to store both the frame and audio
+/// in one place as well as some additional context.
 #[derive(Debug, Clone)]
 pub struct FrameWithAudio {
+    /// The wrapper for the [gst_video::VideoFrame] to get access it its
+    /// information
     pub frame: Frame,
+    /// If there is audio in the video, this will store all the data for the
+    /// audio which is played during the frame.
     pub audio: Option<AudioSlice>,
+    /// Is set if this is the last Frame in the video
     pub is_last: bool,
 }
 
@@ -42,7 +48,8 @@ impl FrameWithAudio {
     }
 }
 
-// TODO: Documetation
+/// A simple wrapper around [gst_video::VideoFrame] to provide some additional
+/// functions used within signing and some nice utilities
 #[derive(Debug)]
 pub struct Frame(gst_video::VideoFrame<gst_video::video_frame::Readable>);
 
@@ -85,6 +92,7 @@ impl Frame {
     }
 
     /// Returns the number of nanoseconds this frame should appear at
+    #[inline]
     pub fn get_timestamp(&self) -> Timestamp {
         let timestamp = self.0.buffer().pts().unwrap_or_default();
         timestamp.into()
@@ -92,6 +100,7 @@ impl Frame {
 
     /// Returns the number of nanoseconds this frame should stop appearing
     /// at (i.e. the next frame)
+    #[inline]
     pub fn get_end_timestamp(&self) -> Timestamp {
         let timestamp: Timestamp = self.0.buffer().pts().unwrap_or_default().into();
         timestamp + self.fps().frame_time()
@@ -103,6 +112,7 @@ impl Frame {
     /// blue) with the rows followed by each other.
     ///
     /// For more info see [gst_video::VideoFrame::plane_data]
+    #[inline]
     pub fn raw_buffer(&self) -> &[u8] {
         self.0.plane_data(0).expect("rgb frames have 1 plane")
     }
@@ -110,18 +120,27 @@ impl Frame {
     /// As the framerate is calculated once we start playing the video, each
     /// frame has access to the framerate, this therefore gives access to
     /// the current [Framerate] the video is expected to be running at
+    #[inline]
     pub fn fps(&self) -> Framerate<usize> {
         self.0.info().fps().into()
     }
 
     /// Returns the width of the frame
+    #[inline]
     pub fn width(&self) -> u32 {
         self.0.info().width()
     }
 
     /// Returns the height of the frame
+    #[inline]
     pub fn height(&self) -> u32 {
         self.0.info().height()
+    }
+
+    /// Returns the information associated with the video
+    #[inline]
+    pub fn info(&self) -> &gst_video::VideoInfo {
+        self.0.info()
     }
 }
 
