@@ -12,6 +12,21 @@ use super::{ParseError, Timestamp};
 
 type RawSignedInterval = Interval<u32, ChunkSignature>;
 
+pub trait AsSubtitle {
+    fn as_subtitle(&self) -> Result<Subtitle, ParseError>;
+}
+
+impl AsSubtitle for RawSignedInterval {
+    fn as_subtitle(&self) -> Result<Subtitle, ParseError> {
+        Ok(Subtitle::new(
+            0,
+            SrtTimestamp::from_milliseconds(self.start),
+            SrtTimestamp::from_milliseconds(self.stop),
+            serde_json::to_string(&self.val)?,
+        ))
+    }
+}
+
 /// Wrapper type for the Interval storing the time range and signatures which
 /// have signed that interval of video
 #[derive(Debug, Clone)]
@@ -209,7 +224,6 @@ impl SignFile {
     ///
     /// sf.write("./mysignatures.ssrt").expect("Failed to write to file");
     /// ```
-    ///
     pub fn push(&mut self, chunk: SignedInterval) {
         self.0.insert(chunk.into())
     }
@@ -238,12 +252,6 @@ impl SignFile {
             })
     }
 
-    /// Iterates over all the `SignedInterval`s stored in the tree, note this is
-    /// not the individual signatures
-    pub fn iter(&self) -> impl Iterator<Item = SignedInterval> + use<'_> {
-        self.0.iter().map(|i| SignedInterval::from(i.clone()))
-    }
-
     /// Writes the current store to a specified srt file
     ///
     /// ```no_run
@@ -268,18 +276,30 @@ impl SignFile {
     ///
     /// sf.push(SignedInterval::new(Timestamp::ZERO, Timestamp::from_millis(1000), signature_info));
     ///
-    /// sf.write("./mysignatures.ssrt").expect("Failed to write sign file");
+    /// sf.write("./mysignatures.ssrt").expect("Failed to write to file");
     /// ```
     ///
     pub fn write<P: AsRef<Path>>(&self, path: P) -> Result<(), ParseError> {
         let subtitles = self
+            .0
             .iter()
-            .map(|c| c.into_subtitle())
+            .map(|c| c.as_subtitle())
             .collect::<Result<Vec<_>, _>>()?;
 
         Subtitles::new_from_vec(subtitles).write_to_file(path, None)?;
 
         Ok(())
+    }
+}
+
+impl IntoIterator for SignFile {
+    type Item = SignedInterval;
+
+    type IntoIter = Box<dyn Iterator<Item = Self::Item>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let res = self.0.into_iter().map(SignedInterval::from);
+        Box::new(res)
     }
 }
 
@@ -296,7 +316,7 @@ impl Extend<SignedInterval> for SignFile {
     ///
     /// Note: Does not compress overlapping fields
     ///
-    /// ```no_run
+    /// ```
     /// use stream_signer::{
     ///     file::{SignFile, SignedInterval, Timestamp},
     ///     spec::{Vec2u, PresentationOrId, ChunkSignature},
@@ -330,7 +350,8 @@ impl Extend<SignedInterval> for SignFile {
     ///   // ...
     /// ]);
     ///
-    /// sf.write("./mysignatures.ssrt").expect("Failed to write to file");
+    /// # let filepath = testlibs::random_test_file() + ".ssrt";
+    /// sf.write(&filepath).expect("Failed to write to file");
     /// ```
     ///
     fn extend<T: IntoIterator<Item = SignedInterval>>(&mut self, iter: T) {
@@ -348,10 +369,103 @@ impl Default for SignFile {
 
 #[cfg(test)]
 mod tests {
-    // use super::*;
+    use crate::spec::Vec2u;
 
-    // TODO:
-    // - Write and Read
-    // - Read invalid
-    // - Write + Read with overlaps
+    use super::*;
+
+    fn chunk_signature() -> ChunkSignature {
+        ChunkSignature {
+            pos: Vec2u::new(0, 0),
+            size: Vec2u::new(1920, 1080),
+            channels: vec![0, 1],
+            presentation: crate::spec::PresentationOrId::new_ref("did:url:https://example.com/sig"),
+            signature: "AAAAAAA".as_bytes().to_owned(),
+        }
+    }
+
+    #[test]
+    fn write_and_read() {
+        let mut signfile = SignFile::new();
+        signfile.push(SignedInterval::new(
+            Timestamp::from_millis(0),
+            Timestamp::from_millis(100),
+            chunk_signature(),
+        ));
+
+        signfile.push(SignedInterval::new(
+            Timestamp::from_millis(100),
+            Timestamp::from_millis(200),
+            chunk_signature(),
+        ));
+
+        signfile.push(SignedInterval::new(
+            Timestamp::from_millis(200),
+            Timestamp::from_millis(300),
+            chunk_signature(),
+        ));
+
+        let file = testlibs::random_temp_file() + ".ssrt";
+        signfile.write(&file).expect("Failed to write to file");
+        let signs = signfile.into_iter().collect::<Vec<_>>();
+
+        let signfile = SignFile::from_file(&file).expect("Could not read file");
+        let new_signs = signfile.into_iter().collect::<Vec<_>>();
+        assert_eq!(
+            signs, new_signs,
+            "Signatures are the same after reading and writing to file"
+        );
+    }
+
+    #[test]
+    fn read_invalid_struct() {
+        let res = SignFile::from_file("./tests/ssrts/invalid_struct.ssrt");
+
+        assert!(
+            matches!(res, Err(ParseError::JsonError(_))),
+            "Invalid JSON is detected and error thrown"
+        )
+    }
+
+    #[test]
+    fn read_invalid_srt() {
+        let res = SignFile::from_file("./tests/ssrts/invalid.ssrt");
+
+        assert!(
+            matches!(res, Err(ParseError::SrtError(_))),
+            "Invalid SRT is detected and error thrown"
+        )
+    }
+
+    #[test]
+    fn write_and_read_with_overlaps() {
+        let mut signfile = SignFile::new();
+        signfile.push(SignedInterval::new(
+            Timestamp::from_millis(0),
+            Timestamp::from_millis(100),
+            chunk_signature(),
+        ));
+
+        signfile.push(SignedInterval::new(
+            Timestamp::from_millis(50),
+            Timestamp::from_millis(150),
+            chunk_signature(),
+        ));
+
+        signfile.push(SignedInterval::new(
+            Timestamp::from_millis(100),
+            Timestamp::from_millis(200),
+            chunk_signature(),
+        ));
+
+        let file = testlibs::random_temp_file() + ".ssrt";
+        signfile.write(&file).expect("Failed to write to file");
+        let signs = signfile.into_iter().collect::<Vec<_>>();
+
+        let signfile = SignFile::from_file(&file).expect("Could not read file");
+        let new_signs = signfile.into_iter().collect::<Vec<_>>();
+        assert_eq!(
+            signs, new_signs,
+            "Signatures are the same after reading and writing to file"
+        );
+    }
 }

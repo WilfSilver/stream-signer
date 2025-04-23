@@ -85,7 +85,7 @@ where
     /// ```
     /// use stream_signer::video::Framerate;
     ///
-    /// let fps = Framerate::new(30, 1);
+    /// let fps = Framerate::<usize>::new(30, 1);
     ///
     /// assert_eq!(fps.convert_to_time(1).as_millis(), 33);
     /// assert_eq!(fps.convert_to_time(2).as_millis(), 66);
@@ -105,7 +105,7 @@ where
     /// ```
     /// use stream_signer::video::Framerate;
     ///
-    /// let fps = Framerate::new(30, 1);
+    /// let fps = Framerate::<usize>::new(30, 1);
     ///
     /// assert_eq!(fps.convert_to_frames(Duration::from_millis(33)), 0);
     /// assert_eq!(fps.convert_to_frames(Duration::from_millis(34)), 1);
@@ -127,7 +127,7 @@ where
     /// ```
     /// use stream_signer::video::Framerate;
     ///
-    /// let fps = Framerate::new(30, 1);
+    /// let fps = Framerate::<usize>::new(30, 1);
     ///
     /// // Note here that the frame time is rounded down to the closest millis as
     /// // we are only getting the millisecond
@@ -139,7 +139,7 @@ where
     /// ```
     /// use stream_signer::video::Framerate;
     ///
-    /// let fps = Framerate::new(60, 1);
+    /// let fps = Framerate::<usize>::new(60, 1);
     ///
     /// // Note here that the frame time is rounded down to the closest millis as
     /// // we are only getting the millisecond
@@ -178,5 +178,52 @@ impl From<Framerate<usize>> for Framerate<f64> {
 impl From<gst::Fraction> for Framerate<usize> {
     fn from(value: gst::Fraction) -> Self {
         Framerate(*value.0.numer() as usize, *value.0.denom() as usize)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn convert_to_time() {
+        let fps = Framerate::<usize>::new(30, 1);
+
+        for (i, millis) in [0, 33, 66, 100, 133, 166, 200].into_iter().enumerate() {
+            assert_eq!(fps.convert_to_time(i).as_millis(), millis, "Converting frame {i} to the time it first appears should equal {millis}");
+        }
+    }
+
+    #[test]
+    fn convert_to_frames() {
+        let fps = Framerate::<usize>::new(30, 1);
+
+        for (i, millis) in [0, 34, 67, 100, 134, 167, 200].into_iter().enumerate() {
+            assert_eq!(fps.convert_to_frames(Duration::from_millis(millis)), i, "Converting {millis}ms to the frame equals {i}");
+        }
+    }
+
+    #[test]
+    fn conversions() {
+        let fps = Framerate::<usize>::new(30, 1);
+
+        for i in 0..100 {
+            assert_eq!(fps.convert_to_frames(*fps.convert_to_time(i)), i, "Converting {i} to time and back again equals the same number");
+        }
+    }
+
+    #[test]
+    fn frame_time() {
+        let rates = [
+            (Framerate::<usize>::new(30, 1), 33),
+            (Framerate::<usize>::new(30, 1), 33),
+            (Framerate::<usize>::new(30, 1), 33),
+            (Framerate::<usize>::new(30, 1), 33),
+            (Framerate::<usize>::new(30, 1), 33),
+        ];
+
+        for (fps, expected) in rates {
+            assert_eq!(fps.frame_time().as_millis(), expected, "{fps:?} has a frame time of {expected}");
+        }
     }
 }

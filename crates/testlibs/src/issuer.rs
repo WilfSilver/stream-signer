@@ -5,8 +5,9 @@ use iota_sdk::types::block::address::Address;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use identity_iota::storage::{JwkDocumentExt, JwkMemStore, Storage};
-use identity_iota::storage::{JwsSignatureOptions, KeyIdMemstore};
+use identity_iota::storage::{
+    JwkDocumentExt, JwkMemStore, JwsSignatureOptions, KeyIdMemstore, Storage,
+};
 use iota_sdk::client::secret::SecretManager;
 
 use super::client::MemClient;

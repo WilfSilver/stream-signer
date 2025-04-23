@@ -104,7 +104,8 @@ pub struct IntervalController<S: Signer> {
     /// [crate::spec::MAX_CHUNK_LENGTH] and [crate::spec::MIN_CHUNK_LENGTH]
     pub interval: Duration,
 
-    /// Whether this the first signature used when signing
+    /// Whether this the first signature used when signing so we can smartly
+    /// determine whether to use a definition or presentation
     is_start: AtomicBool,
 }
 
@@ -179,12 +180,8 @@ impl<S: Signer + 'static> SingleController<S> for IntervalController<S> {
                     .unwrap_or_default()
                     .into();
 
-                let mut res = ChunkSigner::new(
-                    start,
-                    self.signer.clone(),
-                    None,
-                    !self.is_start.load(Ordering::Relaxed),
-                );
+                let mut res = ChunkSigner::new(start, self.signer.clone())
+                    .with_is_ref(!self.is_start.load(Ordering::Relaxed));
 
                 if let Some(emb) = &self.embedding {
                     res = res.with_embedding(emb.pos, emb.size);

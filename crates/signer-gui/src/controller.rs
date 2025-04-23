@@ -70,12 +70,8 @@ impl Controller<TestIdentity> for SignController {
                 || next_frame_time >= MAX_CHUNK_LENGTH
                 || is_last
             {
-                let res = ChunkSigner::new(
-                    *last_sign,
-                    self.signer.clone(),
-                    None,
-                    *last_sign != Timestamp::ZERO,
-                );
+                let res = ChunkSigner::new(*last_sign, self.signer.clone())
+                    .with_is_ref(*last_sign != Timestamp::ZERO);
 
                 self.sign_ctrl.store(false, Ordering::Relaxed);
                 *last_sign = time.start();

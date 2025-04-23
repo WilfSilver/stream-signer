@@ -112,6 +112,8 @@ impl<VC, FC> PipeManager<VC, FC> {
         time.into_frames(self.fps(), self.state.offset)
     }
 
+    /// Collects the information throughout the [PipeManager] to produce a
+    /// [FrameState] which can then be shared with the user
     pub async fn get_frame_state(&self) -> FrameState {
         let exact_time = self.frame.raw.frame.get_timestamp();
 
@@ -133,6 +135,8 @@ impl<VC, FC> PipeManager<VC, FC> {
     }
 }
 
+/// Stores any information relating to the video as a whole and persists for
+/// the whole video.
 #[derive(Debug)]
 pub struct PipeState<VC> {
     /// Stores cached information at the source, and is filled once the source
@@ -160,7 +164,7 @@ impl<VC> Drop for PipeState<VC> {
 }
 
 impl<VC> PipeState<VC> {
-    /// Creates a new pipeline state
+    /// Creates a new pipeline state with a custom context
     pub fn new(init: PipeInitiator, context: VC) -> Result<Self, glib::Error> {
         let state = Self {
             src: init.src,

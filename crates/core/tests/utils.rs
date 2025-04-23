@@ -158,7 +158,7 @@ pub async fn sign_and_verify_multi(
         .await?;
 
     let mut signfile = alice_signfile;
-    signfile.extend(bob_signfile.iter());
+    signfile.extend(bob_signfile.into_iter());
 
     let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 

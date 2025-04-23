@@ -14,7 +14,64 @@ use super::Frame;
 /// Note this is slightly different to [crate::video::manager::FrameManager], as
 /// that is more focused on internally used tools when signing or verifying
 ///
-/// TODO: Examples
+/// ## Examples
+///
+/// If you wanted to check if you are on a specific frame you can do:
+///
+/// ```
+/// use futures::FutureExt;
+/// use stream_signer::video::Controller
+/// use testlibs::TestIdentity;
+///
+/// struct MyController(());
+///
+/// impl Controller<TestIdentity> for MyController {
+///     fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<TestIdentity>>> {
+///         async move {
+///             let frame = &state.frame;
+///             let duration = state.video.duration;
+///
+///             // ... await ...
+///
+///             // Sign every 100 frames or on the last frame
+///             if state.frame_idx() % 100 == 0 || state.is_last {
+///                 vec![todo!()]
+///             } else {
+///                 vec![]
+///             }
+///         }.boxed()
+///     }
+/// }
+/// ```
+///
+/// Or if instead you wanted to sign every X milliseconds you could do:
+///
+/// ```
+/// use futures::FutureExt;
+/// use stream_signer::video::Controller
+/// use testlibs::TestIdentity;
+///
+/// struct MyController(());
+///
+/// impl Controller<TestIdentity> for MyController {
+///     fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<TestIdentity>>> {
+///         async move {
+///             let frame = &state.frame;
+///             let duration = state.video.duration;
+///
+///             // ... await ...
+///
+///             // Sign every 100 milliseconds or on the last frame
+///             let time = state.time;
+///             if (!time.is_start() && (time % Duration::from_millis(100)).is_first()) || state.is_last {
+///                 vec![todo!()]
+///             } else {
+///                 vec![]
+///             }
+///         }.boxed()
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct FrameState {
     /// Stores information about the video itself

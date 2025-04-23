@@ -481,7 +481,8 @@ mod signing {
         ///   // ...
         ///   if !info.time.is_start() && info.time.multiple_of(Duration::from_millis(100)) {
         ///     let res = vec![
-        ///       ChunkSigner::new(info.time.start() - Duration::from_millis(100), signer.clone(), None, is_first),
+        ///       ChunkSigner::new(info.time.start() - Duration::from_millis(100), signer.clone())
+        ///         .with_is_ref(!is_first),
         ///     ];
         ///     is_first = false;
         ///     res

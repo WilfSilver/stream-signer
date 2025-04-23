@@ -293,3 +293,5 @@ impl Deref for CredentialStore {
         &self.map
     }
 }
+
+// TODO: Tests with invalid id
