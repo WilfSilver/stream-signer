@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::{error::Error, sync::Arc, time::Duration};
 
 use futures::{StreamExt, TryStreamExt};
