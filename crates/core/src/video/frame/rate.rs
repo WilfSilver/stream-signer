@@ -32,6 +32,7 @@ impl<T> FramerateCompatible for T where
 /// If you were wanting to create a 30 fps video it would be as follows:
 ///
 /// ```
+/// use std::time::Duration;
 /// use stream_signer::video::Framerate;
 ///
 /// let fps = Framerate::new(30, 1);
@@ -89,7 +90,9 @@ where
     ///
     /// assert_eq!(fps.convert_to_time(1).as_millis(), 33);
     /// assert_eq!(fps.convert_to_time(2).as_millis(), 66);
-    /// assert_eq!(fps.convert_to_time(3).as_millis(), 100);
+    /// // Note here that it cannot round up due to not using floating points
+    /// // in the backend
+    /// assert_eq!(fps.convert_to_time(3).as_millis(), 99);
     /// ```
     #[inline]
     pub fn convert_to_time(&self, frames: usize) -> Timestamp {
@@ -103,20 +106,24 @@ where
     /// timestamp
     ///
     /// ```
+    /// use std::time::Duration;
     /// use stream_signer::video::Framerate;
     ///
     /// let fps = Framerate::<usize>::new(30, 1);
-    ///
-    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(33)), 0);
-    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(34)), 1);
-    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(67)), 2);
+    /// // Due to us using `round`, half way past a frame will round up
+    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(10)), 0);
+    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(33)), 1);
+    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(66)), 2);
     /// assert_eq!(fps.convert_to_frames(Duration::from_millis(100)), 3);
     /// ```
     #[inline]
     pub fn convert_to_frames(&self, duration: Duration) -> usize {
-        (duration * <u32 as NumCast>::from(self.frames()).unwrap()
-            / <u32 as NumCast>::from(self.milliseconds()).unwrap())
-        .as_millis() as usize
+        let res = (duration * <u32 as NumCast>::from(self.frames()).unwrap()).div_duration_f64(
+            Duration::from_secs(<u64 as NumCast>::from(self.seconds()).unwrap()),
+        );
+
+        // Rounds the number to be more accurate
+        res.round() as usize
     }
 
     /// This returns the amount of time a frame is expected to be visible for
@@ -189,8 +196,12 @@ mod tests {
     fn convert_to_time() {
         let fps = Framerate::<usize>::new(30, 1);
 
-        for (i, millis) in [0, 33, 66, 100, 133, 166, 200].into_iter().enumerate() {
-            assert_eq!(fps.convert_to_time(i).as_millis(), millis, "Converting frame {i} to the time it first appears should equal {millis}");
+        for (i, millis) in [0, 33, 66, 99, 133, 166, 199].into_iter().enumerate() {
+            assert_eq!(
+                fps.convert_to_time(i).as_millis(),
+                millis,
+                "Converting frame {i} to the time it first appears should equal {millis}"
+            );
         }
     }
 
@@ -199,7 +210,11 @@ mod tests {
         let fps = Framerate::<usize>::new(30, 1);
 
         for (i, millis) in [0, 34, 67, 100, 134, 167, 200].into_iter().enumerate() {
-            assert_eq!(fps.convert_to_frames(Duration::from_millis(millis)), i, "Converting {millis}ms to the frame equals {i}");
+            assert_eq!(
+                fps.convert_to_frames(Duration::from_millis(millis)),
+                i,
+                "Converting {millis}ms to the frame equals {i}"
+            );
         }
     }
 
@@ -208,7 +223,11 @@ mod tests {
         let fps = Framerate::<usize>::new(30, 1);
 
         for i in 0..100 {
-            assert_eq!(fps.convert_to_frames(*fps.convert_to_time(i)), i, "Converting {i} to time and back again equals the same number");
+            assert_eq!(
+                fps.convert_to_frames(*fps.convert_to_time(i)),
+                i,
+                "Converting {i} to time and back again equals the same number"
+            );
         }
     }
 
@@ -223,7 +242,11 @@ mod tests {
         ];
 
         for (fps, expected) in rates {
-            assert_eq!(fps.frame_time().as_millis(), expected, "{fps:?} has a frame time of {expected}");
+            assert_eq!(
+                fps.frame_time().as_millis(),
+                expected,
+                "{fps:?} has a frame time of {expected}"
+            );
         }
     }
 }

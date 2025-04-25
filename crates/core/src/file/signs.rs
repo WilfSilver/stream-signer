@@ -350,7 +350,7 @@ impl Extend<SignedInterval> for SignFile {
     ///   // ...
     /// ]);
     ///
-    /// # let filepath = testlibs::random_test_file() + ".ssrt";
+    /// # let filepath = testlibs::random_temp_file() + ".ssrt";
     /// sf.write(&filepath).expect("Failed to write to file");
     /// ```
     ///

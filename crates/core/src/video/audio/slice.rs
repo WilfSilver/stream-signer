@@ -18,16 +18,25 @@ pub struct AudioSlice {
     /// The index in the first buffer where the slice starts
     start: usize,
     /// The index in the last buffer where the slice ends
-    end: usize,
+    end: Option<usize>,
+
+    pts_offset: Duration,
 }
 
 impl AudioSlice {
-    pub const fn new(buffers: Vec<Buffer>, info: AudioInfo, start: usize, end: usize) -> Self {
+    pub const fn new(
+        buffers: Vec<Buffer>,
+        info: AudioInfo,
+        start: usize,
+        end: Option<usize>,
+        pts_offset: Duration,
+    ) -> Self {
         Self {
             buffers,
             info,
             start,
             end,
+            pts_offset,
         }
     }
 
@@ -42,7 +51,8 @@ impl AudioSlice {
             .and_then(BufferRef::pts)
             .unwrap_or_default()
             .into();
-        timestamp + self.idx_to_duration(self.start)
+
+        timestamp - self.pts_offset + self.idx_to_duration(self.start)
     }
 
     /// Returns the timestamp of the end of the frame in nanoseconds, this
@@ -57,14 +67,26 @@ impl AudioSlice {
             .unwrap_or_default()
             .into();
 
+        let additional = match self.end {
+            Some(end) => self.idx_to_duration(end),
+            None => Duration::from_nanos(
+                self.buffers
+                    .last()
+                    .map(Buffer::as_ref)
+                    .and_then(BufferRef::duration)
+                    .unwrap_or_default()
+                    .nseconds(),
+            ),
+        };
+
         // Last timestamp + the length of time a sample lasts
-        timestamp + self.idx_to_duration(self.end)
+        timestamp - self.pts_offset + additional
     }
 
     /// Conversion from the index of a buffer to the relative nanoseconds from
     /// the start of the buffer
     fn idx_to_duration(&self, idx: usize) -> Duration {
-        rate_to_duration(self.info.rate()) * idx as u32
+        rate_to_duration(self.info.rate()) * (idx / self.channels()) as u32
     }
 
     /// Wrapper for [AudioInfo::channels]
@@ -94,7 +116,11 @@ impl AudioSlice {
         self.buffers.iter().enumerate().flat_map(move |(j, b)| {
             let mem = b.map_readable().expect("Buffer should have member");
             let start = if j == 0 { self.start } else { 0 };
-            let end = if j == last_idx { self.end } else { mem.len() };
+            let end = if j == last_idx {
+                self.end.unwrap_or_else(|| mem.len())
+            } else {
+                mem.len()
+            };
             let slice = mem.as_slice();
 
             (start..end)
