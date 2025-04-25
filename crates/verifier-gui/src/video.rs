@@ -148,25 +148,25 @@ impl VerifyFeed {
         };
 
         let client = Arc::new(Mutex::new(client));
-        let issuer = TestIssuer::new(client.clone())
-            .await
-            .expect("Failed to create issuer");
-
-        // We have to still create the identities
-        let _identity = TestIdentity::new(&issuer, |id| {
-            Subject::from_json_value(json!({
-              "id": id.as_str(),
-              "name": "Alice",
-              "degree": {
-                "type": "BachelorDegree",
-                "name": "Bachelor of Science and Arts",
-              },
-              "GPA": "4.0",
-            }))
-            .expect("Invalid subject")
-        })
-        .await
-        .expect("Failed to create identity");
+        // let issuer = TestIssuer::new(client.clone())
+        //     .await
+        //     .expect("Failed to create issuer");
+        //
+        // // We have to still create the identities
+        // let _identity = TestIdentity::new(&issuer, |id| {
+        //     Subject::from_json_value(json!({
+        //       "id": id.as_str(),
+        //       "name": "Alice",
+        //       "degree": {
+        //         "type": "BachelorDegree",
+        //         "name": "Bachelor of Science and Arts",
+        //       },
+        //       "GPA": "4.0",
+        //     }))
+        //     .expect("Invalid subject")
+        // })
+        // .await
+        // .expect("Failed to create identity");
 
         let resolver = get_resolver(client);
 
