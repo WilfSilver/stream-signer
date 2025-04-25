@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::{error::Error, sync::Arc, time::Duration};
+use std::{error::Error, fs::File, sync::Arc, time::Duration};
 
 use futures::{StreamExt, TryStreamExt};
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
@@ -13,11 +13,12 @@ use stream_signer::{
     SignFile, SignPipeline,
 };
 use testlibs::{
-    client::{get_client, get_resolver},
+    client::{get_client, get_resolver, MemClient},
     identity::TestIdentity,
     issuer::TestIssuer,
     test_video, videos,
 };
+use tokio::sync::Mutex;
 
 pub async fn skip_loading(state: &SignatureState) -> bool {
     match state {
@@ -284,4 +285,13 @@ pub async fn sign_and_verify_multi_together(
     assert!(count > 0, "We verified some chunks");
 
     Ok(())
+}
+
+pub fn test_client() -> Arc<Mutex<MemClient>> {
+    let client = {
+        let f = File::open("./tests/ssrts/test_client.json").unwrap();
+        serde_json::from_reader::<_, MemClient>(f).unwrap()
+    };
+
+    Arc::new(Mutex::new(client))
 }

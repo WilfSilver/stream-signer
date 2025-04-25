@@ -1,0 +1,36 @@
+{
+	"did:test:UNrXvfc7wIvrOk5gmYxke8ahHaLJJjyo": {
+		"id": "did:test:UNrXvfc7wIvrOk5gmYxke8ahHaLJJjyo",
+		"verificationMethod": [
+			{
+				"id": "did:test:UNrXvfc7wIvrOk5gmYxke8ahHaLJJjyo#MUoJTqp8tocRuQ4CA4QlOLt-yjqDKTlpUhiF81zWn-s",
+				"controller": "did:test:UNrXvfc7wIvrOk5gmYxke8ahHaLJJjyo",
+				"type": "JsonWebKey2020",
+				"publicKeyJwk": {
+					"kty": "OKP",
+					"alg": "EdDSA",
+					"kid": "MUoJTqp8tocRuQ4CA4QlOLt-yjqDKTlpUhiF81zWn-s",
+					"crv": "Ed25519",
+					"x": "ke4Ihvph9dczXY_rUrfVXlqT1vCs4lwJRJ1aYj_8qVA"
+				}
+			}
+		]
+	},
+	"did:test:GVi7xcOVUFe8DBRHf7I0bBV5dty9m0I4": {
+		"id": "did:test:GVi7xcOVUFe8DBRHf7I0bBV5dty9m0I4",
+		"verificationMethod": [
+			{
+				"id": "did:test:GVi7xcOVUFe8DBRHf7I0bBV5dty9m0I4#GwHCEHMgRbxkSwrePLVK98bkJwZIFm3dJwGNb73n6bo",
+				"controller": "did:test:GVi7xcOVUFe8DBRHf7I0bBV5dty9m0I4",
+				"type": "JsonWebKey2020",
+				"publicKeyJwk": {
+					"kty": "OKP",
+					"alg": "EdDSA",
+					"kid": "GwHCEHMgRbxkSwrePLVK98bkJwZIFm3dJwGNb73n6bo",
+					"crv": "Ed25519",
+					"x": "q6fzBiVBfvmS1P5hDLi3WCJ3Vr4iA4hVmBa-ljSdMN8"
+				}
+			}
+		]
+	}
+}

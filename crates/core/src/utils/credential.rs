@@ -22,7 +22,7 @@ pub type Credential = DecodedJwtCredential;
 
 #[derive(Error, Clone, Debug)]
 #[error("Unknown key id used: {0}")]
-pub struct UnknownKey(String);
+pub struct UnknownKey(pub String);
 
 /// Quick bridge to [SubjectState], allowing to use the type `Result<Subject, SubjectError>`
 enum SubjectError {
