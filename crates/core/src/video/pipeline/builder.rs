@@ -40,12 +40,13 @@ pub type BuilderError = glib::BoolError;
 /// ```no_run
 /// use stream_signer::{video::pipeline::FramerateOption, SignPipeline};
 ///
+/// stream_signer::gst::init();
+///
 /// let res = SignPipeline::build("https://example.com/my_video.mp4")
-///     .unwrap()
 ///     .with_frame_rate(FramerateOption::Auto)
 ///     .build();
 ///
-/// assert_ok(res.is_ok());
+/// assert!(res.is_ok());
 /// ```
 ///
 /// ### Build a video with automatic framerate
@@ -55,8 +56,10 @@ pub type BuilderError = glib::BoolError;
 /// a user or video player will expect e.g. 30fps.
 ///
 /// ```
-/// # use testlibs::{test_video, videos}
+/// # use testlibs::{test_video, videos};
 /// use stream_signer::{video::pipeline::FramerateOption, SignPipeline};
+///
+/// stream_signer::gst::init();
 ///
 /// # let my_video_path = test_video(videos::BIG_BUNNY);
 /// let res = SignPipeline::build_from_path(&my_video_path)
@@ -64,21 +67,23 @@ pub type BuilderError = glib::BoolError;
 ///     .with_frame_rate(FramerateOption::Auto)
 ///     .build();
 ///
-/// assert_ok(res.is_ok());
+/// assert!(res.is_ok());
 /// ```
 ///
 /// ### Build a video that consumes the video as fast as possible
 ///
 /// ```
-/// # use testlibs::{test_video, videos}
+/// # use testlibs::{test_video, videos};
 /// use stream_signer::SignPipeline;
+///
+/// stream_signer::gst::init();
 ///
 /// # let my_video_path = test_video(videos::BIG_BUNNY);
 /// let res = SignPipeline::build_from_path(&my_video_path)
 ///     .unwrap()
 ///     .build();
 ///
-/// assert_ok(res.is_ok());
+/// assert!(res.is_ok());
 /// ```
 ///
 /// ### Start at a given point within the video
@@ -91,8 +96,10 @@ pub type BuilderError = glib::BoolError;
 /// This example starts the video at the 2 second mark.
 ///
 /// ```
-/// # use testlibs::{test_video, videos}
-/// use stream_signer::SignPipeline;
+/// # use testlibs::{test_video, videos};
+/// use stream_signer::{SignPipeline, time::Timestamp};
+///
+/// stream_signer::gst::init();
 ///
 /// # let my_video_path = test_video(videos::BIG_BUNNY);
 /// let res = SignPipeline::build_from_path(&my_video_path)
@@ -100,14 +107,16 @@ pub type BuilderError = glib::BoolError;
 ///     .with_start_offset(Timestamp::from_secs(2))
 ///     .build();
 ///
-/// assert_ok(res.is_ok());
+/// assert!(res.is_ok());
 /// ```
 ///
 /// ### Build a video with a custom sink name
 ///
 /// ```
-/// # use testlibs::{test_video, videos}
+/// # use testlibs::{test_video, videos};
 /// use stream_signer::SignPipeline;
+///
+/// stream_signer::gst::init();
 ///
 /// # let my_video_path = test_video(videos::BIG_BUNNY);
 /// let res = SignPipeline::build_from_path(&my_video_path)
@@ -116,7 +125,7 @@ pub type BuilderError = glib::BoolError;
 ///     .with_audio_sink_name("my_audio_sink")
 ///     .build();
 ///
-/// assert_ok(res.is_ok());
+/// assert!(res.is_ok());
 /// ```
 ///
 /// ### Build a video with custom number of audio channels
@@ -125,8 +134,10 @@ pub type BuilderError = glib::BoolError;
 /// pad is detected.
 ///
 /// ```
-/// # use testlibs::{test_video, videos}
+/// # use testlibs::{test_video, videos};
 /// use stream_signer::SignPipeline;
+///
+/// stream_signer::gst::init();
 ///
 /// # let my_video_path = test_video(videos::BIG_BUNNY);
 /// let res = SignPipeline::build_from_path(&my_video_path)
@@ -134,7 +145,7 @@ pub type BuilderError = glib::BoolError;
 ///     .with_audio_channels(4)
 ///     .build();
 ///
-/// assert_ok(res.is_ok());
+/// assert!(res.is_ok());
 /// ```
 ///
 /// ## Pipeline Created
@@ -182,18 +193,11 @@ impl SignPipelineBuilder<'_> {
                 .property("buffer-size", 1_i32),
 
             video_convert: ElementFactory::make("videoconvert"),
-            video_sink: AppSink::builder()
-                .name("video_sink")
-                .sync(false)
-                .max_buffers(1_u32)
-                .drop(false),
+            video_sink: AppSink::builder().sync(false).drop(false),
             video_caps: gst_video::VideoCapsBuilder::new().format(gst_video::VideoFormat::Rgb),
 
             audio_convert: ElementFactory::make("audioconvert"),
-            audio_sink: AppSink::builder()
-                .name("audio_sink")
-                .sync(false)
-                .drop(false),
+            audio_sink: AppSink::builder().sync(false).drop(false),
             audio_caps: gst_audio::AudioCapsBuilder::new().format(gst_audio::AudioFormat::F32le),
 
             start_offset: None,
@@ -243,15 +247,15 @@ impl SignPipelineBuilder<'_> {
         self
     }
 
-    /// Sets the appsink name for the video sink, by default it is `video_sink`
+    /// Sets the appsink name for the video sink
     pub fn with_video_sink_name<S: ToString>(mut self, sink_name: S) -> Self {
         self.video_sink = self.video_sink.name(sink_name.to_string());
         self
     }
 
-    /// Sets the appsink name for the audio sink, by default it is `audio_sink`
+    /// Sets the appsink name for the audio sink
     pub fn with_audio_sink_name<S: ToString>(mut self, sink_name: S) -> Self {
-        self.video_sink = self.video_sink.name(sink_name.to_string());
+        self.audio_sink = self.audio_sink.name(sink_name.to_string());
         self
     }
 
@@ -261,8 +265,11 @@ impl SignPipelineBuilder<'_> {
         Ok(SignPipeline::new(self.build_raw_pipeline()?))
     }
 
-    /// Converts this object into a [Pipeline] with the sink name it is using
+    /// Converts this object into a [crate::video::Pipeline] with the sink name it is using
     /// for the frames
+    ///
+    /// Please note that [crate::video::manager::PipeState::play] must be called
+    /// before you can get the samples
     pub fn build_raw_pipeline(self) -> Result<PipeInitiator, BuilderError> {
         // Create the pipeline and add elements
         let pipe = gst::Pipeline::new();

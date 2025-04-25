@@ -114,7 +114,7 @@ impl<T> Unpin for DelayBuffer<T> {}
 /// use futures::{stream, StreamExt};
 /// use tokio::{pin, time::sleep};
 ///
-/// use stream_signer::utils::DelayedStream;
+/// use stream_signer::utils::{Delayed, DelayedStream};
 ///
 /// # #[tokio::main]
 /// # async fn main() {
@@ -135,8 +135,8 @@ impl<T> Unpin for DelayBuffer<T> {}
 ///
 /// let filtered = delayed.filter_map(|a| async move {
 ///     match a {
-///         super::Delayed::Partial(_) => None,
-///         super::Delayed::Full(init, fut) => Some((init, fut)),
+///         Delayed::Partial(_) => None,
+///         Delayed::Full(init, fut) => Some((init, fut)),
 ///     }
 /// });
 ///

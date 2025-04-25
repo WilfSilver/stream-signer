@@ -3,7 +3,7 @@
 //!
 //! This basically a heavily modified version of [vid_frame_iter](https://github.com/Farmadupe/vid_dup_finder_lib/blob/main/vid_frame_iter)
 
-use std::{iter::FusedIterator, sync::Arc};
+use std::{iter::FusedIterator, sync::Arc, time::Duration};
 
 use gst::{CoreError, MessageView, Sample};
 use gst_app::AppSink;
@@ -38,6 +38,10 @@ pub struct FrameIter<VC> {
 
     /// Caches all the audio so it create an [super::audio::AudioSlice]
     pub audio_buffer: AudioBuffer,
+
+    /// Stores the timestamp of the first frame so we can normalise it to start
+    /// at 0
+    frame_start: Option<Duration>,
 }
 
 pub type SampleWithState<VC> = (Arc<PipeState<VC>>, Result<FrameWithAudio, glib::Error>);
@@ -50,6 +54,7 @@ impl<VC> FrameIter<VC> {
             timeout: gst::ClockTime::SECOND,
             fused: false,
             audio_buffer: AudioBuffer::default(),
+            frame_start: None,
         })
     }
 
@@ -147,7 +152,19 @@ impl<VC> Iterator for FrameIter<VC> {
         let sample = self.get_sample_for(&video_sink);
         match sample {
             Some(Ok(sample)) => {
-                let frame: Frame = sample.into();
+                let start = match self.frame_start {
+                    Some(thing) => thing,
+                    None => *self.frame_start.insert(Duration::from_nanos(
+                        sample
+                            .buffer()
+                            .unwrap()
+                            .pts()
+                            .unwrap_or_default()
+                            .nseconds(),
+                    )),
+                };
+
+                let frame = Frame::new(sample, start);
                 let end_timestamp = frame.get_end_timestamp();
 
                 if let Some(audio_sink) = audio_sink {
@@ -163,10 +180,9 @@ impl<VC> Iterator for FrameIter<VC> {
                     }
                 }
 
-                let fps = frame.fps();
                 Some(Ok(FrameWithAudio {
                     frame,
-                    audio: self.audio_buffer.pop_next_frame(fps),
+                    audio: self.audio_buffer.pop_until(end_timestamp),
                     is_last: video_sink.is_eos(),
                 }))
             }
@@ -175,3 +191,6 @@ impl<VC> Iterator for FrameIter<VC> {
         }
     }
 }
+
+// TODO: Tests
+// - Check that there is frame with audio for every frame for video

@@ -15,12 +15,13 @@ use crate::video::{ChunkSigner, FrameState, Signer};
 /// [super::MultiController]
 ///
 /// ```
-/// use std::time::Duration;
-/// use stream_signer::video::sign::{Controller, Signer};
+/// use std::{sync::{atomic::{AtomicBool, Ordering}, Arc}, time::Duration};
+/// use futures::{future::{self, BoxFuture}, FutureExt};
+/// use stream_signer::video::{sign::{Controller, Signer}, ChunkSigner, FrameState};
 ///
 /// struct MyController<S: Signer> {
-///     pub Signer: Arc<S>,
-///     pub interval: Duration;
+///     pub signer: Arc<S>,
+///     pub interval: Duration,
 ///     /// Whether this the first signature used when signing so that we
 ///     /// can smartly determine whether to use a definition or presentation
 ///     is_start: AtomicBool,
@@ -41,17 +42,13 @@ use crate::video::{ChunkSigner, FrameState, Signer};
 ///                 let mut res = ChunkSigner::new(start, self.signer.clone())
 ///                     .with_is_ref(!self.is_start.load(Ordering::Relaxed));
 ///
-///                 if let Some(emb) = &self.embedding {
-///                     res = res.with_embedding(emb.pos, emb.size);
-///                 }
-///
 ///                 self.is_start.store(true, Ordering::Relaxed);
 ///
 ///                 vec![res]
 ///             } else {
 ///                 vec![]
 ///             }
-///         })
+///         }).boxed()
 ///     }
 /// }
 /// ```

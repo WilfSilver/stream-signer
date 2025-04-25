@@ -1,6 +1,8 @@
 //! This provides an wrapper around [gst_video::VideoFrame] to make it easier
 //! to just get the buffer of the frame and it's related information
 
+use std::time::Duration;
+
 use gst_video::VideoFrameExt;
 
 pub use image::GenericImageView;
@@ -51,9 +53,52 @@ impl FrameWithAudio {
 /// A simple wrapper around [gst_video::VideoFrame] to provide some additional
 /// functions used within signing and some nice utilities
 #[derive(Debug)]
-pub struct Frame(gst_video::VideoFrame<gst_video::video_frame::Readable>);
+pub struct Frame {
+    /// Stores the raw frame information from gstreamer
+    raw: gst_video::VideoFrame<gst_video::video_frame::Readable>,
+    /// Stores a cache of the actual pts, removing the start offset
+    pts: Timestamp,
+}
 
 impl Frame {
+    pub fn new(sample: gst::Sample, pts_offset: Duration) -> Self {
+        let caps = sample.caps().expect("Sample without caps");
+        let info = gst_video::VideoInfo::from_caps(caps).expect("Failed to parse caps");
+
+        let buffer = sample
+            .buffer_owned()
+            .expect("Failed to get buffer from appsink");
+
+        let pts: Timestamp = buffer.pts().unwrap_or_default().into();
+
+        let frame = gst_video::VideoFrame::from_buffer_readable(buffer, &info)
+            .expect("Failed to map buffer readable");
+
+        Self {
+            raw: frame,
+            pts: pts - pts_offset,
+        }
+    }
+
+    /// This can be used when it is known this is the first frame and therefore
+    /// the timestamp should be 0
+    pub fn new_first(sample: gst::Sample) -> Self {
+        let caps = sample.caps().expect("Sample without caps");
+        let info = gst_video::VideoInfo::from_caps(caps).expect("Failed to parse caps");
+
+        let buffer = sample
+            .buffer_owned()
+            .expect("Failed to get buffer from appsink");
+
+        let frame = gst_video::VideoFrame::from_buffer_readable(buffer, &info)
+            .expect("Failed to map buffer readable");
+
+        Self {
+            raw: frame,
+            pts: Timestamp::ZERO,
+        }
+    }
+
     /// This returns the bytes which are within the given bounds determined by
     /// `pos` and `size`
     ///
@@ -91,19 +136,24 @@ impl Frame {
         Ok(it)
     }
 
-    /// Returns the number of nanoseconds this frame should appear at
+    /// Returns the number of nanoseconds this frame should appear at, also
+    /// known as the presentation timestamp
     #[inline]
-    pub fn get_timestamp(&self) -> Timestamp {
-        let timestamp = self.0.buffer().pts().unwrap_or_default();
-        timestamp.into()
+    pub const fn get_timestamp(&self) -> Timestamp {
+        self.pts
+    }
+
+    #[inline]
+    pub fn get_duration(&self) -> Duration {
+        let timestamp = self.raw.buffer().duration().unwrap_or_default();
+        Duration::from_nanos(timestamp.nseconds())
     }
 
     /// Returns the number of nanoseconds this frame should stop appearing
     /// at (i.e. the next frame)
     #[inline]
     pub fn get_end_timestamp(&self) -> Timestamp {
-        let timestamp: Timestamp = self.0.buffer().pts().unwrap_or_default().into();
-        timestamp + self.fps().frame_time()
+        self.get_timestamp() + self.fps().frame_time()
     }
 
     /// Returns the raw slice of bytes of the [Frame].
@@ -114,7 +164,7 @@ impl Frame {
     /// For more info see [gst_video::VideoFrame::plane_data]
     #[inline]
     pub fn raw_buffer(&self) -> &[u8] {
-        self.0.plane_data(0).expect("rgb frames have 1 plane")
+        self.raw.plane_data(0).expect("rgb frames have 1 plane")
     }
 
     /// As the framerate is calculated once we start playing the video, each
@@ -122,25 +172,25 @@ impl Frame {
     /// the current [Framerate] the video is expected to be running at
     #[inline]
     pub fn fps(&self) -> Framerate<usize> {
-        self.0.info().fps().into()
+        self.raw.info().fps().into()
     }
 
     /// Returns the width of the frame
     #[inline]
     pub fn width(&self) -> u32 {
-        self.0.info().width()
+        self.raw.info().width()
     }
 
     /// Returns the height of the frame
     #[inline]
     pub fn height(&self) -> u32 {
-        self.0.info().height()
+        self.raw.info().height()
     }
 
     /// Returns the information associated with the video
     #[inline]
     pub fn info(&self) -> &gst_video::VideoInfo {
-        self.0.info()
+        self.raw.info()
     }
 }
 
@@ -148,26 +198,13 @@ impl Clone for Frame {
     /// Clone this video frame. This operation is cheap because it does not clone the underlying
     /// data (it actually relies on gstreamer's refcounting mechanism)
     fn clone(&self) -> Self {
-        let buffer = self.0.buffer_owned();
-        let frame = gst_video::VideoFrame::from_buffer_readable(buffer, self.0.info())
+        let buffer = self.raw.buffer_owned();
+        let frame = gst_video::VideoFrame::from_buffer_readable(buffer, self.raw.info())
             .expect("Failed to map buffer readable");
-        Self(frame)
-    }
-}
-
-impl From<gst::Sample> for Frame {
-    fn from(sample: gst::Sample) -> Self {
-        let caps = sample.caps().expect("Sample without caps");
-        let info = gst_video::VideoInfo::from_caps(caps).expect("Failed to parse caps");
-
-        let buffer = sample
-            .buffer_owned()
-            .expect("Failed to get buffer from appsink");
-
-        let frame = gst_video::VideoFrame::from_buffer_readable(buffer, &info)
-            .expect("Failed to map buffer readable");
-
-        Self(frame)
+        Self {
+            raw: frame,
+            pts: self.pts,
+        }
     }
 }
 
@@ -195,10 +232,10 @@ impl ImageFns for Frame {
         let layout = image::flat::SampleLayout {
             channels: 3,
             channel_stride: 1,
-            width: self.0.width(),
+            width: self.raw.width(),
             width_stride: 3,
-            height: self.0.height(),
-            height_stride: self.0.plane_stride()[0] as usize,
+            height: self.raw.height(),
+            height_stride: self.raw.plane_stride()[0] as usize,
         };
 
         image::FlatSamples {

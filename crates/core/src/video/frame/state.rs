@@ -19,9 +19,9 @@ use super::Frame;
 /// If you wanted to check if you are on a specific frame you can do:
 ///
 /// ```
-/// use futures::FutureExt;
-/// use stream_signer::video::Controller
-/// use testlibs::TestIdentity;
+/// use futures::{future::BoxFuture, FutureExt};
+/// use stream_signer::video::{ChunkSigner, sign::Controller, FrameState};
+/// use testlibs::identity::TestIdentity;
 ///
 /// struct MyController(());
 ///
@@ -47,9 +47,11 @@ use super::Frame;
 /// Or if instead you wanted to sign every X milliseconds you could do:
 ///
 /// ```
-/// use futures::FutureExt;
-/// use stream_signer::video::Controller
-/// use testlibs::TestIdentity;
+/// use std::time::Duration;
+//8
+/// use futures::{future::BoxFuture, FutureExt};
+/// use stream_signer::video::{ChunkSigner, sign::Controller, FrameState};
+/// use testlibs::identity::TestIdentity;
 ///
 /// struct MyController(());
 ///
