@@ -29,7 +29,7 @@ use utils::{sign_and_verify_int, skip_loading};
 
 #[tokio::test]
 async fn sign_and_verify_embedding() -> Result<(), Box<dyn Error>> {
-    sign_and_verify_int(|i| {
+    sign_and_verify_int(videos::BIG_BUNNY, |i| {
         sign::IntervalController::build(i, ONE_HUNDRED_MILLIS)
             .with_embedding(Vec2u::new(10, 10), Vec2u::new(100, 100))
     })

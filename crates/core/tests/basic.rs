@@ -7,13 +7,17 @@ use std::{error::Error, time::Duration};
 
 use constants::ONE_HUNDRED_MILLIS;
 use stream_signer::video::sign;
+use testlibs::videos;
 use utils::{sign_and_verify_int, sign_and_verify_multi, sign_and_verify_multi_together};
 
 mod utils;
 
 #[tokio::test]
 async fn sign_and_verify() -> Result<(), Box<dyn Error>> {
-    sign_and_verify_int(|i| sign::IntervalController::build(i, ONE_HUNDRED_MILLIS)).await
+    sign_and_verify_int(videos::BIG_BUNNY, |i| {
+        sign::IntervalController::build(i, ONE_HUNDRED_MILLIS)
+    })
+    .await
 }
 
 #[tokio::test]

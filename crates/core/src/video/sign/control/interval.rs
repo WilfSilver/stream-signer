@@ -189,6 +189,10 @@ impl<S: Signer + 'static> SingleController<S> for IntervalController<S> {
                     res = res.with_embedding(emb.pos, emb.size);
                 }
 
+                if let Some(channels) = &self.channels {
+                    res = res.with_channels(channels.clone());
+                }
+
                 self.is_start.store(false, Ordering::Relaxed);
                 Some(res)
             } else {
