@@ -1,6 +1,6 @@
 use futures::{future::BoxFuture, FutureExt};
 
-use crate::video::{ChunkSigner, FrameState, Signer};
+use crate::video::{sign::ChunkSignerBuilder, FrameState, Signer};
 
 /// This has a slightly different interface from [super::Controller] and
 /// focuses on allowing to have multiple [SingleController]s to be added
@@ -10,13 +10,13 @@ use crate::video::{ChunkSigner, FrameState, Signer};
 /// is [SingleController::get_as_chunks] to help with this e.g.
 ///
 /// ```
-/// use stream_signer::video::{sign::control::{Controller, SingleController}, ChunkSigner, FrameState, Signer};
+/// use stream_signer::video::{sign::{control::{Controller, SingleController}, ChunkSignerBuilder}, FrameState, Signer};
 /// use futures::{future::BoxFuture, FutureExt};
 ///
 /// struct MyStruct;
 ///
 /// impl<S: Signer + 'static> SingleController<S> for MyStruct {
-///     fn get_chunk(&self, state: &FrameState) -> BoxFuture<Option<ChunkSigner<S>>> {
+///     fn get_chunk(&self, state: &FrameState) -> BoxFuture<Option<ChunkSignerBuilder<S>>> {
 ///         async {
 ///             todo!()
 ///         }
@@ -25,7 +25,7 @@ use crate::video::{ChunkSigner, FrameState, Signer};
 /// }
 ///
 /// impl<S: Signer + 'static> Controller<S> for MyStruct {
-///     fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<S>>> {
+///     fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSignerBuilder<S>>> {
 ///         self.get_as_chunks(state)
 ///     }
 /// }
@@ -33,11 +33,11 @@ use crate::video::{ChunkSigner, FrameState, Signer};
 pub trait SingleController<S: Signer + 'static> {
     /// Returns a single chunk as an [Option], if a chunk is returned it is
     /// then used to sign the video
-    fn get_chunk(&self, state: &FrameState) -> BoxFuture<Option<ChunkSigner<S>>>;
+    fn get_chunk(&self, state: &FrameState) -> BoxFuture<Option<ChunkSignerBuilder<S>>>;
 
     /// A simple wrapper to convert [SingleController::get_chunk] to a vector
     /// so that the type can then implement [super::Controller]
-    fn get_as_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<S>>> {
+    fn get_as_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSignerBuilder<S>>> {
         self.get_chunk(&state).map(opt_to_vec).boxed()
     }
 }

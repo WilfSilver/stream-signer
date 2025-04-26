@@ -2,6 +2,7 @@
 //! frame.
 
 use crate::{
+    file::Timestamp,
     utils::TimeRange,
     video::{audio::AudioSlice, pipeline::SrcInfo, Pipeline},
 };
@@ -20,13 +21,13 @@ use super::Frame;
 ///
 /// ```
 /// use futures::{future::BoxFuture, FutureExt};
-/// use stream_signer::video::{ChunkSigner, sign::Controller, FrameState};
+/// use stream_signer::video::{sign::{ChunkSignerBuilder, Controller}, FrameState};
 /// use testlibs::identity::TestIdentity;
 ///
 /// struct MyController(());
 ///
 /// impl Controller<TestIdentity> for MyController {
-///     fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<TestIdentity>>> {
+///     fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSignerBuilder<TestIdentity>>> {
 ///         async move {
 ///             let frame = &state.frame;
 ///             let duration = state.video.duration;
@@ -50,13 +51,13 @@ use super::Frame;
 /// use std::time::Duration;
 //8
 /// use futures::{future::BoxFuture, FutureExt};
-/// use stream_signer::video::{ChunkSigner, sign::Controller, FrameState};
+/// use stream_signer::video::{sign::{ChunkSignerBuilder, Controller}, FrameState};
 /// use testlibs::identity::TestIdentity;
 ///
 /// struct MyController(());
 ///
 /// impl Controller<TestIdentity> for MyController {
-///     fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<TestIdentity>>> {
+///     fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSignerBuilder<TestIdentity>>> {
 ///         async move {
 ///             let frame = &state.frame;
 ///             let duration = state.video.duration;
@@ -100,6 +101,8 @@ pub struct FrameState {
     /// information see [TimeRange]
     pub time: TimeRange,
     pub(crate) frame_idx: usize,
+
+    pub start_offset: Timestamp,
 }
 
 impl FrameState {

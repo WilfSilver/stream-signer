@@ -196,8 +196,8 @@ mod signing {
             frame::FrameWithAudio,
             manager::sign,
             sign::{
-                AsyncFnMutController, ChunkSigner, Controller, FnMutController, MultiController,
-                SingleController,
+                AsyncFnMutController, ChunkSignerBuilder, Controller, FnMutController,
+                MultiController, SingleController,
             },
             FrameState, Signer, SigningError,
         },
@@ -213,7 +213,7 @@ mod signing {
         /// timeframe and rgb frame.
         ///
         /// From the output of this, it will then sign the chunks defined by
-        /// [ChunkSigner] concurrently as to not interfere with the video
+        /// [crate::video::sign::ChunkSigner] concurrently as to not interfere with the video
         /// playback.
         ///
         /// For example if you wanted to sign in 100ms second intervals
@@ -431,7 +431,7 @@ mod signing {
 
         /// Basic wrapper around [FnMutController] and calling [Self::sign_with].
         ///
-        /// If the function returns some [ChunkSigner], it will use the information to
+        /// If the function returns some [crate::video::sign::ChunkSigner], it will use the information to
         /// sign the chunk form the `start` property to the current timestamp.
         ///
         /// For example if you wanted to sign a video in 100ms second intervals you
@@ -481,7 +481,7 @@ mod signing {
         ///   // ...
         ///   if !info.time.is_start() && info.time.multiple_of(Duration::from_millis(100)) {
         ///     let res = vec![
-        ///       ChunkSigner::new(info.time.start() - Duration::from_millis(100), signer.clone())
+        ///       ChunkSigner::build(info.time.start() - Duration::from_millis(100), signer.clone())
         ///         .with_is_ref(!is_first),
         ///     ];
         ///     is_first = false;
@@ -507,7 +507,7 @@ mod signing {
         ) -> Result<impl Stream<Item = Result<SignedInterval, SigningError>>, StreamError>
         where
             S: Signer + 'static,
-            F: FnMut(FrameState) -> Vec<ChunkSigner<S>> + Sync + Send + 'static,
+            F: FnMut(FrameState) -> Vec<ChunkSignerBuilder<S>> + Sync + Send + 'static,
         {
             self.sign_with::<FnMutController<S, _>, _>(sign_with.into())
         }
@@ -521,7 +521,7 @@ mod signing {
         where
             S: Signer + 'static,
             F: FnMut(FrameState) -> FUT + Sync + Send + 'static,
-            FUT: Future<Output = Vec<ChunkSigner<S>>> + Send + 'static,
+            FUT: Future<Output = Vec<ChunkSignerBuilder<S>>> + Send + 'static,
         {
             self.sign_with::<AsyncFnMutController<S, _, _>, S>(sign_with.into())
         }

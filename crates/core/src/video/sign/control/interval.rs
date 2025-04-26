@@ -14,7 +14,7 @@ use crate::{
     file::Timestamp,
     spec::Vec2u,
     utils::TimeRange,
-    video::{ChunkSigner, FrameState, Signer},
+    video::{sign::ChunkSignerBuilder, ChunkSigner, FrameState, Signer},
 };
 
 use super::{Controller, SingleController};
@@ -157,14 +157,14 @@ impl<S: Signer> IntervalController<S> {
 
 impl<S: Signer + 'static> Controller<S> for IntervalController<S> {
     #[inline]
-    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<S>>> {
+    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSignerBuilder<S>>> {
         self.get_as_chunks(state)
     }
 }
 
 impl<S: Signer + 'static> SingleController<S> for IntervalController<S> {
     #[inline]
-    fn get_chunk(&self, state: &FrameState) -> BoxFuture<Option<ChunkSigner<S>>> {
+    fn get_chunk(&self, state: &FrameState) -> BoxFuture<Option<ChunkSignerBuilder<S>>> {
         let Some(time) = self.convert_time(state.time) else {
             return future::ready(None).boxed();
         };
@@ -172,7 +172,9 @@ impl<S: Signer + 'static> SingleController<S> for IntervalController<S> {
         future::ready({
             // Note the is of is_last here means that the last chunk will
             // always overlap with another. This was mostly done to save time
-            if (!time.is_start() && (time % self.interval).is_first()) || state.is_last {
+            if (!(time - state.start_offset).is_start() && (time % self.interval).is_first())
+                || state.is_last
+            {
                 let start = state
                     .time
                     .start()
@@ -180,14 +182,14 @@ impl<S: Signer + 'static> SingleController<S> for IntervalController<S> {
                     .unwrap_or_default()
                     .into();
 
-                let mut res = ChunkSigner::new(start, self.signer.clone())
+                let mut res = ChunkSigner::build(start, self.signer.clone())
                     .with_is_ref(!self.is_start.load(Ordering::Relaxed));
 
                 if let Some(emb) = &self.embedding {
                     res = res.with_embedding(emb.pos, emb.size);
                 }
 
-                self.is_start.store(true, Ordering::Relaxed);
+                self.is_start.store(false, Ordering::Relaxed);
                 Some(res)
             } else {
                 None
@@ -196,3 +198,6 @@ impl<S: Signer + 'static> SingleController<S> for IntervalController<S> {
         .boxed()
     }
 }
+
+// TODO:
+// - Tests to make sure there is only one def

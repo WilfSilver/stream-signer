@@ -7,19 +7,13 @@ use druid::{
     Color, Data, Event, ExtEventSink, Lens, PaintCtx, Widget, WidgetExt,
 };
 use futures::StreamExt;
-use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use im::Vector;
-use serde_json::json;
 use stream_signer::{
     gst,
     video::{pipeline::FramerateOption, verify::SignatureState},
     SignFile, SignPipeline,
 };
-use testlibs::{
-    client::{get_resolver, MemClient},
-    identity::TestIdentity,
-    issuer::TestIssuer,
-};
+use testlibs::client::{get_resolver, MemClient};
 use tokio::sync::Mutex;
 
 use crate::state::{AppData, View};

@@ -40,7 +40,7 @@ impl FrameWithAudio {
         &'a self,
         pos: Vec2u,
         size: Vec2u,
-        channels: &'a Option<Vec<usize>>,
+        channels: &'a [usize],
     ) -> Result<Box<dyn Iterator<Item = u8> + 'a>, SigOperationError> {
         let frame = self.frame.cropped_buffer(pos, size)?;
         Ok(match &self.audio {
@@ -118,18 +118,19 @@ impl Frame {
         }
 
         let buf = self.raw_buffer();
+
         const DEPTH: usize = 3;
         let start_idx = DEPTH * (pos.x + pos.y * self.width()) as usize;
         // This ends on the first pixel outside the value (which is why we don't add `size.x`)
         let end_idx = DEPTH * (pos.x + (pos.y + size.y) * self.width()) as usize;
 
-        let row_size = size.x as usize * 3;
+        let row_size = DEPTH * size.x as usize;
 
-        let width = self.width() as usize;
+        let bit_width = DEPTH * self.width() as usize;
         let it = buf[start_idx..end_idx]
             .iter()
             .enumerate()
-            .filter(move |(i, _)| i % width >= row_size)
+            .filter(move |(i, _)| i % bit_width < row_size)
             .map(|(_, v)| v)
             .cloned();
 
@@ -141,6 +142,11 @@ impl Frame {
     #[inline]
     pub const fn get_timestamp(&self) -> Timestamp {
         self.pts
+    }
+
+    #[inline]
+    pub fn size(&self) -> Vec2u {
+        Vec2u::new(self.width(), self.height())
     }
 
     #[inline]
@@ -243,5 +249,123 @@ impl ImageFns for Frame {
             layout,
             color_hint: Some(image::ColorType::Rgb8),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use testlibs::{test_video, videos};
+
+    use crate::SignPipeline;
+
+    use super::*;
+
+    #[test]
+    fn cropped_buffer() -> Result<(), Box<dyn Error>> {
+        crate::gst::init()?;
+
+        let videos = vec![
+            (videos::BIG_BUNNY, 640_usize * 360 * 3),
+            (videos::BIG_BUNNY_LONG, 1920_usize * 1080 * 3),
+        ];
+        for (vid, expected_length) in videos {
+            let filepath = test_video(vid);
+
+            let pipeline = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+            let mut iter = pipeline.try_into_iter(())?;
+            let first = iter
+                .next()
+                .expect("There is not at least one frame in the video")
+                .expect("Frame was not able to be decoded from video");
+
+            let full_crop = first
+                .frame
+                .cropped_buffer(Vec2u::default(), first.frame.dimensions().into())
+                .expect("Cropped video correctly")
+                .collect::<Vec<_>>();
+
+            assert_eq!(
+                full_crop.len(),
+                expected_length,
+                "The length of the full crop is correct"
+            );
+
+            let size = Vec2u::new(100, 100);
+            let crop = first
+                .frame
+                .cropped_buffer(Vec2u::new(10, 10), size)
+                .expect("Cropped video correctly")
+                .collect::<Vec<_>>();
+
+            assert_eq!(
+                crop.len(),
+                (size.x * size.y * 3) as usize,
+                "The length of the small crop is correct"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn too_large_crop() -> Result<(), Box<dyn Error>> {
+        crate::gst::init()?;
+
+        let filepath = test_video(videos::BIG_BUNNY);
+
+        let pipeline = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+        let mut iter = pipeline.try_into_iter(())?;
+        let first = iter
+            .next()
+            .expect("There is not at least one frame in the video")
+            .expect("Frame was not able to be decoded from video");
+
+        let tests = vec![
+            (
+                Vec2u::default(),
+                Vec2u::new(first.frame.width() + 1, first.frame.height()),
+            ),
+            (
+                Vec2u::default(),
+                Vec2u::new(first.frame.width(), first.frame.height() + 1),
+            ),
+            (
+                Vec2u::new(1, 0),
+                Vec2u::new(first.frame.width(), first.frame.height()),
+            ),
+            (
+                Vec2u::new(0, 1),
+                Vec2u::new(first.frame.width(), first.frame.height()),
+            ),
+            (
+                Vec2u::new(first.frame.width(), 0),
+                Vec2u::new(1, first.frame.height()),
+            ),
+            (
+                Vec2u::new(0, first.frame.height()),
+                Vec2u::new(first.frame.width(), 1),
+            ),
+            (Vec2u::default(), Vec2u::new(0, first.frame.height())),
+            (Vec2u::default(), Vec2u::new(first.frame.width(), 0)),
+        ];
+
+        for (pos, size) in tests {
+            let crop = first.frame.cropped_buffer(pos, size);
+
+            assert!(
+                matches!(
+                    crop,
+                    Err(SigOperationError::InvalidCrop(epos, esize))
+                        if epos == pos && esize == size,
+                ),
+                "An invalid crop was detected"
+            );
+        }
+
+        Ok(())
     }
 }

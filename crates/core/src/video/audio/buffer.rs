@@ -87,9 +87,24 @@ pub struct AudioBuffer {
     /// Stores the timestamp of the first timestamp, which should be 0 but is
     /// commonly not, therefore all remaining timestmaps need to be offset
     pts_offset: Option<Duration>,
+
+    /// The time that the video starts so we can correctly calculate the
+    /// [Self::pts_offset]
+    start_offset: Timestamp,
 }
 
 impl AudioBuffer {
+    pub const fn new(start_offset: Timestamp) -> Self {
+        Self {
+            buffer: VecDeque::new(),
+            info: None,
+            start_idx: 0,
+            rel_start: Duration::ZERO,
+            pts_offset: None,
+            start_offset,
+        }
+    }
+
     /// Adds the given [gst::Sample] to the buffers.
     ///
     /// NOTE: This assumes that the given Sample is an audio sample (and so
@@ -101,10 +116,10 @@ impl AudioBuffer {
             .expect("Failed to get buffer from appsink");
 
         if self.pts_offset.is_none() {
-            self.pts_offset = Some(Duration::from_nanos(
-                buffer.pts().unwrap_or_default().nseconds(),
-            ));
-            // self.pts_offset = Some(Duration::ZERO);
+            self.pts_offset = Some(
+                Duration::from_nanos(buffer.pts().unwrap_or_default().nseconds())
+                    - *self.start_offset,
+            );
         }
 
         self.buffer.push_back(buffer);
@@ -236,8 +251,6 @@ impl AudioBuffer {
     #[inline]
     fn buffer_duration(&self, buf: &Buffer) -> Duration {
         Duration::from_nanos(buf.duration().unwrap().nseconds())
-        // rate_to_duration(self.info.as_ref().unwrap().rate())
-        //     * (buf.map_readable().unwrap().len() / self.channels().unwrap()) as u32
     }
 }
 
@@ -358,30 +371,17 @@ mod tests {
 
         let mut audio_buffer = AudioBuffer::default();
 
-        let sample = state
-            .get_video_sink()
-            .try_pull_sample(gst::ClockTime::SECOND)
-            .unwrap();
+        let audio_sink = state
+            .get_audio_sink()
+            .expect("Audio should exist with BIG_BUNNY_LONG");
 
-        let frame: Frame = Frame::new_first(sample);
-        let end_timestamp = frame.get_end_timestamp();
+        audio_buffer.add_sample(
+            audio_sink
+                .try_pull_sample(gst::ClockTime::MSECOND)
+                .expect("Should be first audio buffer"),
+        );
 
-        let audio_sink = state.get_audio_sink();
-        if let Some(audio_sink) = audio_sink {
-            if !audio_sink.is_eos() {
-                while audio_buffer.get_end_timestamp() < end_timestamp {
-                    let sample = audio_sink.try_pull_sample(gst::ClockTime::SECOND);
-                    match sample {
-                        Some(sample) => audio_buffer.add_sample(sample),
-                        None => break, // Reached end of video
-                    }
-                }
-            }
-        }
-
-        let audio_slice = audio_buffer.pop_until(end_timestamp).unwrap();
-
-        assert_eq!(audio_slice.channels(), 2, "Detected 2 channels");
+        assert_eq!(audio_buffer.channels(), Some(2), "Detected 2 channels");
 
         Ok(())
     }

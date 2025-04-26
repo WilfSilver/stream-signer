@@ -1,3 +1,6 @@
+// TODO:
+// - Count the signatures generated
+
 mod constants;
 
 use std::{error::Error, time::Duration};
