@@ -86,12 +86,17 @@ impl AudioSlice {
     /// Conversion from the index of a buffer to the relative nanoseconds from
     /// the start of the buffer
     fn idx_to_duration(&self, idx: usize) -> Duration {
-        rate_to_duration(self.info.rate()) * (idx / self.channels()) as u32
+        rate_to_duration(self.info.rate())
+            * (idx / (self.channels() * self.channel_byte_width())) as u32
     }
 
     /// Wrapper for [AudioInfo::channels]
     pub fn channels(&self) -> usize {
         self.info.channels() as usize
+    }
+
+    pub fn channel_byte_width(&self) -> usize {
+        self.info.format_info().width() as usize / 8
     }
 
     /// Returns an iterator over the bytes relating to a specific channel
@@ -123,9 +128,13 @@ impl AudioSlice {
             };
             let slice = mem.as_slice();
 
-            (start..end)
-                .step_by(self.channels())
-                .map(|k| slice[k + i])
+            let width = self.channel_byte_width();
+
+            let channel_offset = i * width;
+            (start + channel_offset..end + channel_offset)
+                .step_by(self.channels() * width)
+                .flat_map(|k| &slice[k..k + width])
+                .cloned()
                 .collect::<Vec<_>>()
         })
     }
@@ -220,7 +229,7 @@ mod tests {
 
     #[test]
     fn correct_crop() -> Result<(), Box<dyn Error>> {
-        let slice = get_first_slice(videos::BIG_BUNNY_LONG)?;
+        let slice = get_first_slice(videos::BIG_BUNNY_AUDIO)?;
 
         let full_crop = slice
             .cropped_buffer(&[0, 1])
@@ -252,7 +261,7 @@ mod tests {
 
     #[test]
     fn invalid_crop() -> Result<(), Box<dyn Error>> {
-        let slice = get_first_slice(videos::BIG_BUNNY_LONG)?;
+        let slice = get_first_slice(videos::BIG_BUNNY_AUDIO)?;
 
         let crop = slice.cropped_buffer(&[0, 3, 8]);
 

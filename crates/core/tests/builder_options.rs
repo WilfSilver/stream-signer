@@ -193,7 +193,7 @@ async fn sign_with_start_offset_and_audio() -> Result<(), Box<dyn Error>> {
     })
     .await?;
 
-    let filepath = test_video(videos::BIG_BUNNY_LONG);
+    let filepath = test_video(videos::BIG_BUNNY_AUDIO);
 
     let pipe = SignPipeline::build_from_path(&filepath)
         .unwrap()
@@ -317,6 +317,8 @@ async fn sign_and_verify_with_diff_start_offset() -> Result<(), Box<dyn Error>> 
                                 "{s:?} the first few signatures are invalid due to not having enough data"
                             );
                         } else {
+                            // Due to the current code we cannot handle this use case
+                            // but this could be changed in the future
                             assert!(
                                 matches!(
                                     s,

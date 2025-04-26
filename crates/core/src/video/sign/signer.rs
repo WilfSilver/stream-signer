@@ -335,7 +335,7 @@ impl<S: Signer> ChunkSignerBuilder<S> {
 /// let chunk_signer = ChunkSigner::build(Timestamp::from_millis(100), signer);
 /// #
 /// # stream_signer::gst::init();
-/// # let video = test_video(videos::BIG_BUNNY_LONG);
+/// # let video = test_video(videos::BIG_BUNNY_1080);
 /// # let pipe = SignPipeline::build_from_path(&video).unwrap().build().unwrap();
 /// # let mut iter = pipe.try_into_iter(()).unwrap();
 /// # let frame_with_audio = iter.next().unwrap().unwrap();

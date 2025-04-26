@@ -1,7 +1,7 @@
 mod constants;
 mod utils;
 
-use std::{error::Error, sync::Arc, time::Duration};
+use std::{error::Error, pin::pin, sync::Arc, time::Duration};
 
 use constants::ONE_HUNDRED_MILLIS;
 use futures::{StreamExt, TryStreamExt};
@@ -167,40 +167,49 @@ async fn verify_with_invalid_chunk_length() -> Result<(), Box<dyn Error>> {
         let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 
         let mut count = 0;
-        pipe.verify(resolver.clone(), signfile)?
-            .for_each(|v| {
+        let mut stream = pin!(pipe.verify(resolver.clone(), signfile)?);
+        while let Some(v) = stream.next().await {
+            let v = match v {
+                Ok(v) => v,
+                Err(e) => {
+                    panic!("Frame was invalid: {e}");
+                }
+            };
+
+            let mut validated = false;
+            for s in &v.sigs {
+                if skip_loading(s).await {
+                    // Give it time to calculate the signature as this takes
+                    // a while
+                    tokio::spawn(tokio::time::sleep(Duration::from_millis(100)))
+                        .await
+                        .unwrap();
+                    continue;
+                }
+
                 count += 1;
 
-                let v = match v {
-                    Ok(v) => v,
-                    Err(e) => {
-                        panic!("Frame was invalid: {e}");
-                    }
-                };
-
-                async move {
-                    for s in &v.sigs {
-                        if skip_loading(s).await {
-                            return;
-                        }
-
-                        assert!(
-                            matches!(
-                                s,
-                                SignatureState::Invalid(
-                                    InvalidSignatureError::Operation(
-                                        SigOperationError::InvalidChunkSize(
-                                            elength,
-                                        ),
-                                    ),
-                                ) if *elength == length
+                assert!(
+                    matches!(
+                        s,
+                        SignatureState::Invalid(
+                            InvalidSignatureError::Operation(
+                                SigOperationError::InvalidChunkSize(
+                                    elength,
+                                ),
                             ),
-                            "{s:?} marks itself as an invalid chunk length with length {length:.2?}"
-                        );
-                    }
-                }
-            })
-            .await;
+                        ) if *elength == length
+                    ),
+                    "{s:?} marks itself as an invalid chunk length with length {length:.2?}"
+                );
+                // Validate one to make the test much faster
+                validated = true;
+            }
+
+            if validated {
+                break;
+            }
+        }
 
         assert!(count > 0, "We verified some chunks");
     }

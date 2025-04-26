@@ -3,7 +3,7 @@ use std::{collections::VecDeque, time::Duration};
 use gst::{Buffer, BufferRef};
 use gst_audio::AudioInfo;
 
-use crate::file::Timestamp;
+use crate::{file::Timestamp, time::ONE_SECOND_MILLIS};
 
 use super::AudioSlice;
 
@@ -25,7 +25,7 @@ use super::AudioSlice;
 ///     SignPipeline,
 /// };
 /// # use testlibs::{test_video, videos};
-/// # let my_video_with_audio = test_video(videos::BIG_BUNNY_LONG);
+/// # let my_video_with_audio = test_video(videos::BIG_BUNNY_AUDIO);
 ///
 /// stream_signer::gst::init();
 ///
@@ -240,8 +240,16 @@ impl AudioBuffer {
     /// NOTE: Assumes that [Self::info] is fine to unwrap
     #[inline]
     fn duration_to_idx(&self, time: Duration) -> usize {
-        self.channels().unwrap()
-            * (time * self.info.as_ref().unwrap().rate()).as_secs_f64() as usize
+        let info = self.info.as_ref().unwrap();
+
+        // We need to round to nearest 100 micro seconds due to loss of
+        // information
+        let seconds = (time * info.rate()).as_secs_f64();
+        const ROUND: f64 = ONE_SECOND_MILLIS as f64 * 10.;
+        let seconds = (seconds * ROUND).round() / ROUND;
+
+        let channel_byte_width = (info.format_info().width() / 8) as usize;
+        self.channels().unwrap() * channel_byte_width * seconds as usize
     }
 
     /// Returns the nanosecond length for a Buffer, taking into account the
@@ -285,7 +293,7 @@ mod tests {
     fn timestamps_match() -> Result<(), Box<dyn Error>> {
         crate::gst::init()?;
 
-        let filepath = test_video(videos::BIG_BUNNY_LONG);
+        let filepath = test_video(videos::BIG_BUNNY_AUDIO);
 
         let init = SignPipeline::build_from_path(&filepath)
             .unwrap()
@@ -335,19 +343,20 @@ mod tests {
             let audio_slice = audio_buffer.pop_until(end_timestamp).unwrap();
 
             let expected_start = frame.get_timestamp();
-            let expected_end = frame.get_end_timestamp();
+            let got_start = audio_slice.get_timestamp();
             assert!(
                 (expected_start
-                    .checked_sub(Duration::from_micros(10))
+                    .checked_sub(Duration::from_micros(100))
                     .unwrap_or_default()
                     .into()..=expected_start)
-                    .contains(&audio_slice.get_timestamp()),
-                "{i} | Starting timestamp is roughly {expected_start:.2?}",
+                    .contains(&got_start),
+                "{i} | Starting timestamp {got_start:.6?} is roughly {expected_start:.6?}",
             );
+            let expected_end = frame.get_end_timestamp();
+            let got_end = audio_slice.get_end_timestamp();
             assert!(
-                (expected_end - Duration::from_micros(10)..=expected_end)
-                    .contains(&audio_slice.get_end_timestamp()),
-                "{i} | Ending timestamp is roughly {expected_end:.2?}",
+                (expected_end - Duration::from_micros(100)..=expected_end).contains(&got_end),
+                "{i} | Ending timestamp {got_end:.6?} is roughly {expected_end:.5?}",
             );
 
             i += 1;
@@ -357,10 +366,46 @@ mod tests {
     }
 
     #[test]
+    fn buffer_length_matches() -> Result<(), Box<dyn Error>> {
+        crate::gst::init()?;
+
+        let filepath = test_video(videos::BIG_BUNNY_AUDIO);
+
+        let init = SignPipeline::build_from_path(&filepath)
+            .unwrap()
+            .build_raw_pipeline()?;
+
+        let state = PipeState::new(init, ())?;
+        state.play()?;
+
+        let mut audio_buffer = AudioBuffer::default();
+
+        let audio_sink = state
+            .get_audio_sink()
+            .expect("Audio should exist with BIG_BUNNY_LONG");
+
+        audio_buffer.add_sample(
+            audio_sink
+                .try_pull_sample(gst::ClockTime::MSECOND)
+                .expect("Should be first audio buffer"),
+        );
+
+        let buf = &audio_buffer.buffer[0];
+        let duration = audio_buffer.buffer_duration(buf);
+        assert_eq!(
+            buf.map_readable().unwrap().len(),
+            audio_buffer.duration_to_idx(duration),
+            "The indexes match for the duration to index"
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn channels_detected() -> Result<(), Box<dyn Error>> {
         crate::gst::init()?;
 
-        let filepath = test_video(videos::BIG_BUNNY_LONG);
+        let filepath = test_video(videos::BIG_BUNNY_AUDIO);
 
         let init = SignPipeline::build_from_path(&filepath)
             .unwrap()

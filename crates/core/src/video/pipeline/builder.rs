@@ -198,7 +198,8 @@ impl SignPipelineBuilder<'_> {
 
             audio_convert: ElementFactory::make("audioconvert"),
             audio_sink: AppSink::builder().sync(false).drop(false),
-            audio_caps: gst_audio::AudioCapsBuilder::new().format(gst_audio::AudioFormat::F32le),
+            audio_caps: gst_audio::AudioCapsBuilder::new()
+                .layout(gst_audio::AudioLayout::Interleaved),
 
             start_offset: None,
         }

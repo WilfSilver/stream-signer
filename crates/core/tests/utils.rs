@@ -32,7 +32,7 @@ pub async fn skip_loading(state: &SignatureState) -> bool {
     }
 }
 
-pub async fn sign_and_verify_int<F, C>(get_controller: F) -> Result<(), Box<dyn Error>>
+pub async fn sign_and_verify_int<F, C>(video: &str, get_controller: F) -> Result<(), Box<dyn Error>>
 where
     F: Fn(Arc<TestIdentity>) -> C,
     C: Controller<TestIdentity> + 'static,
@@ -57,7 +57,7 @@ where
     })
     .await?;
 
-    let filepath = test_video(videos::BIG_BUNNY);
+    let filepath = test_video(video);
 
     let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
 

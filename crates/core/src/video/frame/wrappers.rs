@@ -268,7 +268,7 @@ mod tests {
 
         let videos = vec![
             (videos::BIG_BUNNY, 640_usize * 360 * 3),
-            (videos::BIG_BUNNY_LONG, 1920_usize * 1080 * 3),
+            (videos::BIG_BUNNY_1080, 1920_usize * 1080 * 3),
         ];
         for (vid, expected_length) in videos {
             let filepath = test_video(vid);
