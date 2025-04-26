@@ -1,6 +1,6 @@
 use futures::{future::BoxFuture, stream, FutureExt, StreamExt};
 
-use crate::video::{ChunkSigner, FrameState, Signer};
+use crate::video::{sign::ChunkSignerBuilder, FrameState, Signer};
 
 use super::{Controller, SingleController};
 
@@ -92,7 +92,7 @@ impl<S: Signer + 'static> From<Vec<Box<dyn SingleController<S> + Sync + Send>>>
 
 impl<S: Signer + 'static> Controller<S> for MultiController<S> {
     #[inline]
-    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<S>>> {
+    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSignerBuilder<S>>> {
         stream::iter(self.0.iter())
             .filter_map(move |ctrl| ctrl.get_chunk(&state))
             .collect::<Vec<_>>()

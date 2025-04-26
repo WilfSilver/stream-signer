@@ -41,7 +41,7 @@ pub struct FrameIter<VC> {
 
     /// Stores the timestamp of the first frame so we can normalise it to start
     /// at 0
-    frame_start: Option<Duration>,
+    pts_offset: Option<Duration>,
 }
 
 pub type SampleWithState<VC> = (Arc<PipeState<VC>>, Result<FrameWithAudio, glib::Error>);
@@ -50,11 +50,11 @@ impl<VC> FrameIter<VC> {
     pub fn new(init: PipeInitiator, context: VC) -> Result<Self, glib::Error> {
         let state = PipeState::new(init, context)?;
         Ok(Self {
+            audio_buffer: AudioBuffer::new(state.offset),
             state: Arc::new(state),
             timeout: gst::ClockTime::SECOND,
             fused: false,
-            audio_buffer: AudioBuffer::default(),
-            frame_start: None,
+            pts_offset: None,
         })
     }
 
@@ -152,19 +152,35 @@ impl<VC> Iterator for FrameIter<VC> {
         let sample = self.get_sample_for(&video_sink);
         match sample {
             Some(Ok(sample)) => {
-                let start = match self.frame_start {
+                let offset = match self.pts_offset {
                     Some(thing) => thing,
-                    None => *self.frame_start.insert(Duration::from_nanos(
-                        sample
-                            .buffer()
-                            .unwrap()
-                            .pts()
-                            .unwrap_or_default()
-                            .nseconds(),
-                    )),
+                    None => {
+                        // We need to minus the expected start point as we
+                        // don't want to normalise to this pts.
+                        let duration = Duration::from_nanos(
+                            sample
+                                .buffer()
+                                .unwrap()
+                                .pts()
+                                .unwrap_or_default()
+                                .nseconds(),
+                        ) - *self.state.offset;
+
+                        *self.pts_offset.insert(duration)
+                    }
                 };
 
-                let frame = Frame::new(sample, start);
+                let frame = Frame::new(sample, offset);
+
+                // Sometimes the start offset will interrupt a frame and so it
+                // won't show for the full duration. Therefore in this case we
+                // just want to skip it
+                if !self.state.offset.is_zero() && frame.get_duration() != frame.fps().frame_time()
+                {
+                    self.pts_offset = None;
+                    return self.next();
+                }
+
                 let end_timestamp = frame.get_end_timestamp();
 
                 if let Some(audio_sink) = audio_sink {

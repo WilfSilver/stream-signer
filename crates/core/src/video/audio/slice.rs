@@ -147,22 +147,123 @@ impl AudioSlice {
     /// vector
     pub fn cropped_buffer<'a>(
         &'a self,
-        channels: &'a Option<Vec<usize>>,
-    ) -> Result<Box<dyn Iterator<Item = u8> + 'a>, SigOperationError> {
-        Ok(match channels {
-            Some(limit) => {
-                let max = self.channels();
-                let mut invalid_channels = limit.iter().filter(|x| **x >= max).peekable();
+        channels: &'a [usize],
+    ) -> Result<impl Iterator<Item = u8> + 'a, SigOperationError> {
+        let max = self.channels();
+        let mut invalid_channels = channels.iter().filter(|x| **x >= max).peekable();
 
-                if invalid_channels.peek().is_some() {
-                    return Err(SigOperationError::InvalidChannels(
-                        invalid_channels.cloned().collect::<Vec<_>>(),
-                    ));
+        if invalid_channels.peek().is_some() {
+            return Err(SigOperationError::InvalidChannels(
+                invalid_channels.cloned().collect::<Vec<_>>(),
+            ));
+        }
+
+        Ok(channels
+            .iter()
+            .flat_map(|i| self.unchecked_channel_buffer(*i)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use testlibs::{test_video, videos};
+
+    use crate::{
+        video::{audio::AudioBuffer, manager::PipeState, Frame},
+        SignPipeline,
+    };
+
+    use super::*;
+
+    fn get_first_slice(video: &str) -> Result<AudioSlice, Box<dyn Error>> {
+        crate::gst::init()?;
+
+        let filepath = test_video(video);
+
+        let init = SignPipeline::build_from_path(&filepath)
+            .unwrap()
+            .build_raw_pipeline()?;
+
+        let state = PipeState::new(init, ())?;
+        state.play()?;
+
+        let mut audio_buffer = AudioBuffer::default();
+
+        let frame = Frame::new_first(
+            state
+                .get_video_sink()
+                .try_pull_sample(gst::ClockTime::SECOND)
+                .unwrap(),
+        );
+
+        let end_timestamp = frame.get_end_timestamp();
+
+        let audio_sink = state.get_audio_sink();
+        if let Some(audio_sink) = audio_sink {
+            if !audio_sink.is_eos() {
+                while audio_buffer.get_end_timestamp() < end_timestamp {
+                    let sample = audio_sink.try_pull_sample(gst::ClockTime::MSECOND);
+                    match sample {
+                        Some(sample) => audio_buffer.add_sample(sample),
+                        None => break, // Reached end of video
+                    }
                 }
-
-                Box::new(limit.iter().flat_map(|i| self.unchecked_channel_buffer(*i)))
             }
-            None => Box::new((0..self.channels()).flat_map(|i| self.unchecked_channel_buffer(i))),
-        })
+        }
+
+        // This also checks that we will always get a audio slice for all
+        // frames
+        Ok(audio_buffer.pop_until(end_timestamp).unwrap())
+    }
+
+    #[test]
+    fn correct_crop() -> Result<(), Box<dyn Error>> {
+        let slice = get_first_slice(videos::BIG_BUNNY_LONG)?;
+
+        let full_crop = slice
+            .cropped_buffer(&[0, 1])
+            .expect("Should be able to create crop")
+            .collect::<Vec<_>>();
+
+        let expected_length = slice.buffers[0].map_readable().unwrap().len() + slice.end.unwrap();
+        assert_eq!(
+            full_crop.len(),
+            expected_length,
+            "Full crop matches the expected length"
+        );
+
+        for c in 0..1 {
+            let channel_crop = slice
+                .cropped_buffer(&[c])
+                .expect("Should be able to create crop")
+                .collect::<Vec<_>>();
+
+            assert_eq!(
+                channel_crop.len(),
+                expected_length / 2, // 2 is the expected number of channels
+                "Full crop matches the expected length"
+            );
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_crop() -> Result<(), Box<dyn Error>> {
+        let slice = get_first_slice(videos::BIG_BUNNY_LONG)?;
+
+        let crop = slice.cropped_buffer(&[0, 3, 8]);
+
+        assert!(
+            matches!(
+                crop,
+                Err(SigOperationError::InvalidChannels(channels))
+                    if channels == vec![3, 8]),
+            "Found error when trying to crop with invalid buffer"
+        );
+
+        Ok(())
     }
 }

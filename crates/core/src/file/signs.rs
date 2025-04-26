@@ -163,7 +163,7 @@ impl<'a> From<SignedChunk<'a>> for SignedInterval {
 /// }
 /// ```
 ///
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SignFile(Lapper<u32, ChunkSignature>);
 
 impl SignFile {
@@ -243,7 +243,7 @@ impl SignFile {
     ///
     pub fn get_signatures_at(&self, at: Timestamp) -> impl Iterator<Item = SignedChunk<'_>> {
         self.0
-            .find(at.as_millis_u32(), at.as_millis_u32())
+            .find(at.as_millis_u32(), at.as_millis_u32() + 1)
             .map(|i| {
                 SignedChunk::new(
                     Timestamp::from_millis_u32(i.start)..Timestamp::from_millis_u32(i.stop),

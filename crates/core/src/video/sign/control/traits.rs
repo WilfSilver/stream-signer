@@ -1,6 +1,6 @@
 use futures::future::BoxFuture;
 
-use crate::video::{ChunkSigner, FrameState, Signer};
+use crate::video::{sign::ChunkSignerBuilder, FrameState, Signer};
 
 /// This trait signifies an structure which can be used to control how a
 /// signature is signed
@@ -17,7 +17,7 @@ use crate::video::{ChunkSigner, FrameState, Signer};
 /// ```
 /// use std::{sync::{atomic::{AtomicBool, Ordering}, Arc}, time::Duration};
 /// use futures::{future::{self, BoxFuture}, FutureExt};
-/// use stream_signer::video::{sign::{Controller, Signer}, ChunkSigner, FrameState};
+/// use stream_signer::video::{sign::{Controller, Signer, ChunkSignerBuilder}, ChunkSigner, FrameState};
 ///
 /// struct MyController<S: Signer> {
 ///     pub signer: Arc<S>,
@@ -28,7 +28,7 @@ use crate::video::{ChunkSigner, FrameState, Signer};
 /// }
 ///
 /// impl<S: Signer + 'static> Controller<S> for MyController<S> {
-///     fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<S>>> {
+///     fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSignerBuilder<S>>> {
 ///         future::ready({
 ///             let time = state.time;
 ///             if (!time.is_start() && (time % self.interval).is_first()) || state.is_last {
@@ -39,7 +39,7 @@ use crate::video::{ChunkSigner, FrameState, Signer};
 ///                     .unwrap_or_default()
 ///                     .into();
 ///
-///                 let mut res = ChunkSigner::new(start, self.signer.clone())
+///                 let mut res = ChunkSigner::build(start, self.signer.clone())
 ///                     .with_is_ref(!self.is_start.load(Ordering::Relaxed));
 ///
 ///                 self.is_start.store(true, Ordering::Relaxed);
@@ -56,9 +56,9 @@ pub trait Controller<S: Signer>: Send + Sync {
     /// This function is called for every frame, given the [FrameState] with
     /// any information that might help the signing process
     ///
-    /// The function can then choose to return some amount of [ChunkSigner]
-    /// which defines a [crate::spec::ChunkSignature] that ends at the current
-    /// frame.
+    /// The function can then choose to return some amount of [ChunkSignerBuilder]
+    /// which builds a [crate::video::ChunkSigner] which finally defines a [crate::spec::ChunkSignature]
+    /// that ends at the current frame.
     ///
     /// The [crate::spec::ChunkSignature] is then generated and returned from
     /// the [crate::video::SignPipeline::sign_with] function.
@@ -66,5 +66,5 @@ pub trait Controller<S: Signer>: Send + Sync {
     /// NOTE: This function is called on the same thread as the frame
     /// consumption and so should not take longer than the time a frame is
     /// visible for
-    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<S>>>;
+    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSignerBuilder<S>>>;
 }

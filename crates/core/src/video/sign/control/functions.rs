@@ -3,7 +3,7 @@ use std::future::{self, Future};
 use futures::{future::BoxFuture, FutureExt};
 use tokio::sync::Mutex;
 
-use crate::video::{ChunkSigner, FrameState, Signer};
+use crate::video::{sign::ChunkSignerBuilder, FrameState, Signer};
 
 use super::Controller;
 
@@ -31,7 +31,7 @@ use super::Controller;
 /// # async fn main() -> Result<(), Box<dyn Error>> {
 /// use std::sync::Arc;
 /// use std::time::Duration;
-/// use stream_signer::{video::{sign, ChunkSigner, Signer}, SignPipeline, SignFile, TryStreamExt};
+/// use stream_signer::{video::{sign::{self, ChunkSignerBuilder}, ChunkSigner, Signer}, SignPipeline, SignFile, TryStreamExt};
 ///
 /// stream_signer::gst::init()?;
 ///
@@ -58,7 +58,7 @@ use super::Controller;
 /// let controller = sign::FnController(move |state| {
 ///   if !state.time.is_start() && state.time.multiple_of(Duration::from_millis(100)) {
 ///     let res = vec![
-///       ChunkSigner::new(state.time.start() - Duration::from_millis(100), signer.clone()),
+///       ChunkSigner::build(state.time.start() - Duration::from_millis(100), signer.clone()),
 ///     ];
 ///     res
 ///   } else {
@@ -80,12 +80,12 @@ use super::Controller;
 pub struct FnController<S, F>(pub F)
 where
     S: Signer + 'static,
-    F: Fn(FrameState) -> Vec<ChunkSigner<S>> + Send + Sync;
+    F: Fn(FrameState) -> Vec<ChunkSignerBuilder<S>> + Send + Sync;
 
 impl<S, F> From<F> for FnController<S, F>
 where
     S: Signer + 'static,
-    F: Fn(FrameState) -> Vec<ChunkSigner<S>> + Send + Sync,
+    F: Fn(FrameState) -> Vec<ChunkSignerBuilder<S>> + Send + Sync,
 {
     fn from(value: F) -> Self {
         FnController(value)
@@ -95,10 +95,10 @@ where
 impl<S, F> Controller<S> for FnController<S, F>
 where
     S: Signer + 'static,
-    F: Fn(FrameState) -> Vec<ChunkSigner<S>> + Send + Sync,
+    F: Fn(FrameState) -> Vec<ChunkSignerBuilder<S>> + Send + Sync,
 {
     #[inline]
-    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<S>>> {
+    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSignerBuilder<S>>> {
         future::ready(self.0(state)).boxed()
     }
 }
@@ -128,7 +128,7 @@ where
 /// use futures::future;
 /// use std::sync::Arc;
 /// use std::time::Duration;
-/// use stream_signer::{video::{sign, ChunkSigner, Signer}, SignPipeline, SignFile, TryStreamExt};
+/// use stream_signer::{video::{sign::{self, ChunkSignerBuilder}, ChunkSigner, Signer}, SignPipeline, SignFile, TryStreamExt};
 ///
 /// stream_signer::gst::init()?;
 ///
@@ -157,7 +157,7 @@ where
 ///   async move {
 ///     if !state.time.is_start() && state.time.multiple_of(Duration::from_millis(100)) {
 ///       let res = vec![
-///         ChunkSigner::new(state.time.start() - Duration::from_millis(100), signer.clone()),
+///         ChunkSigner::build(state.time.start() - Duration::from_millis(100), signer.clone()),
 ///       ];
 ///
 ///       // ... await ...
@@ -184,13 +184,13 @@ pub struct AsyncFnController<S, F, FUT>(pub F)
 where
     S: Signer + 'static,
     F: Fn(FrameState) -> FUT + Send + Sync,
-    FUT: Future<Output = Vec<ChunkSigner<S>>> + Send;
+    FUT: Future<Output = Vec<ChunkSignerBuilder<S>>> + Send;
 
 impl<S, F, FUT> From<F> for AsyncFnController<S, F, FUT>
 where
     S: Signer + 'static,
     F: Fn(FrameState) -> FUT + Send + Sync,
-    FUT: Future<Output = Vec<ChunkSigner<S>>> + Send,
+    FUT: Future<Output = Vec<ChunkSignerBuilder<S>>> + Send,
 {
     fn from(value: F) -> Self {
         AsyncFnController(value)
@@ -201,10 +201,10 @@ impl<S, F, FUT> Controller<S> for AsyncFnController<S, F, FUT>
 where
     S: Signer + 'static,
     F: Fn(FrameState) -> FUT + Send + Sync,
-    FUT: Future<Output = Vec<ChunkSigner<S>>> + Send,
+    FUT: Future<Output = Vec<ChunkSignerBuilder<S>>> + Send,
 {
     #[inline]
-    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<S>>> {
+    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSignerBuilder<S>>> {
         self.0(state).boxed()
     }
 }
@@ -235,7 +235,7 @@ where
 /// use futures::future;
 /// use std::sync::Arc;
 /// use std::time::Duration;
-/// use stream_signer::{video::{sign, ChunkSigner, Signer}, SignPipeline, SignFile, TryStreamExt};
+/// use stream_signer::{video::{sign::{self, ChunkSignerBuilder}, ChunkSigner, Signer}, SignPipeline, SignFile, TryStreamExt};
 ///
 /// stream_signer::gst::init()?;
 ///
@@ -263,7 +263,7 @@ where
 /// let controller = sign::FnMutController::new(move |state| {
 ///   if !state.time.is_start() && state.time.multiple_of(Duration::from_millis(100)) {
 ///     let res = vec![
-///       ChunkSigner::new(state.time.start() - Duration::from_millis(100), signer.clone())
+///       ChunkSigner::build(state.time.start() - Duration::from_millis(100), signer.clone())
 ///         .with_is_ref(!is_first),
 ///     ];
 ///     is_first = false;
@@ -288,12 +288,12 @@ where
 pub struct FnMutController<S, F>(pub Mutex<F>)
 where
     S: Signer + 'static,
-    F: FnMut(FrameState) -> Vec<ChunkSigner<S>> + Send + Sync;
+    F: FnMut(FrameState) -> Vec<ChunkSignerBuilder<S>> + Send + Sync;
 
 impl<S, F> From<F> for FnMutController<S, F>
 where
     S: Signer + 'static,
-    F: FnMut(FrameState) -> Vec<ChunkSigner<S>> + Send + Sync,
+    F: FnMut(FrameState) -> Vec<ChunkSignerBuilder<S>> + Send + Sync,
 {
     fn from(value: F) -> Self {
         FnMutController(Mutex::new(value))
@@ -303,7 +303,7 @@ where
 impl<S, F> FnMutController<S, F>
 where
     S: Signer + 'static,
-    F: FnMut(FrameState) -> Vec<ChunkSigner<S>> + Send + Sync,
+    F: FnMut(FrameState) -> Vec<ChunkSignerBuilder<S>> + Send + Sync,
 {
     pub fn new(func: F) -> Self {
         Self(Mutex::new(func))
@@ -313,10 +313,10 @@ where
 impl<S, F> Controller<S> for FnMutController<S, F>
 where
     S: Signer + 'static,
-    F: FnMut(FrameState) -> Vec<ChunkSigner<S>> + Sync + Send,
+    F: FnMut(FrameState) -> Vec<ChunkSignerBuilder<S>> + Sync + Send,
 {
     #[inline]
-    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<S>>> {
+    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSignerBuilder<S>>> {
         async move {
             let mut func = self.0.lock().await;
             func(state)
@@ -331,13 +331,13 @@ pub struct AsyncFnMutController<S, F, FUT>(pub Mutex<F>)
 where
     S: Signer + 'static,
     F: FnMut(FrameState) -> FUT,
-    FUT: Future<Output = Vec<ChunkSigner<S>>> + Send;
+    FUT: Future<Output = Vec<ChunkSignerBuilder<S>>> + Send;
 
 impl<S, F, FUT> From<F> for AsyncFnMutController<S, F, FUT>
 where
     S: Signer + 'static,
     F: FnMut(FrameState) -> FUT,
-    FUT: Future<Output = Vec<ChunkSigner<S>>> + Send,
+    FUT: Future<Output = Vec<ChunkSignerBuilder<S>>> + Send,
 {
     fn from(value: F) -> Self {
         AsyncFnMutController(Mutex::new(value))
@@ -348,10 +348,10 @@ impl<S, F, FUT> Controller<S> for AsyncFnMutController<S, F, FUT>
 where
     S: Signer + 'static,
     F: FnMut(FrameState) -> FUT + Sync + Send,
-    FUT: Future<Output = Vec<ChunkSigner<S>>> + Send,
+    FUT: Future<Output = Vec<ChunkSignerBuilder<S>>> + Send,
 {
     #[inline]
-    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<S>>> {
+    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSignerBuilder<S>>> {
         async move {
             let mut func = self.0.lock().await;
             func(state).await

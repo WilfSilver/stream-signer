@@ -17,11 +17,11 @@ use crate::{file::Timestamp, spec::Vec2u, utils::TimeRange};
 use super::{
     frame::FrameWithAudio,
     pipeline::{PipeInitiator, SrcInfo},
-    Frame, FrameState, Framerate, Pipeline, SigOperationError, StreamError,
+    FrameState, Framerate, Pipeline, SigOperationError, StreamError,
 };
 
 /// This trait is designed to make it easier to extract the exact bytes which
-/// need encrypting from a stored buffer of [Frame]s
+/// need encrypting from a stored buffer of [super::Frame]s
 pub trait FrameBuffer {
     /// This should return the specific frames within the given range as an iterator,
     /// this is not done through a given trait of [std::ops::Range], to make it more flexible to
@@ -42,7 +42,7 @@ pub trait FrameBuffer {
         pos: Vec2u,
         size: Vec2u,
         range: Range<usize>,
-        channels: &Option<Vec<usize>>,
+        channels: &[usize],
     ) -> Result<Vec<u8>, SigOperationError> {
         let capacity = 3 * size.x as usize * size.y as usize * range.len();
         let mut frames_buf: Vec<u8> = Vec::new();
@@ -131,6 +131,7 @@ impl<VC, FC> PipeManager<VC, FC> {
             frame: self.frame.raw.frame.clone(),
             frame_idx: self.frame.idx,
             time: TimeRange::new(exact_time, self.fps().frame_time()),
+            start_offset: self.state.offset,
         }
     }
 }
@@ -293,7 +294,7 @@ impl<FC> FrameManager<FC> {
 
     /// Returns the width and height of the frame as a [Vec2u]
     pub fn size(&self) -> Vec2u {
-        Vec2u::new(self.raw.frame.width(), self.raw.frame.height())
+        self.raw.frame.size()
     }
 }
 
@@ -311,7 +312,8 @@ pub mod sign {
         file::SignedInterval,
         spec::CHUNK_LENGTH_RANGE,
         video::{
-            audio::AudioSlice, sign::Controller, ChunkSigner, Signer, SigningError, StreamError,
+            sign::{ChunkSignerBuilder, Controller},
+            ChunkSigner, Signer, SigningError, StreamError,
         },
     };
 
@@ -415,7 +417,7 @@ pub mod sign {
             self.context
                 .len()
                 .checked_sub(
-                    self.idx
+                    self.idx + 1 // TODO: WHYY is it + 1
                         - self.timestamp.excess_frames(self.raw.frame.fps())
                         - start.into_frames(self.raw.frame.fps(), start_offset),
                 )
@@ -443,14 +445,15 @@ pub mod sign {
 
             if !CHUNK_LENGTH_RANGE.contains(&length) {
                 return Err(SigOperationError::InvalidChunkSize(length));
+            } else if signer.start < start_offset {
+                return Err(SigOperationError::OutOfRange(signer.start, self.timestamp));
             }
 
             let start_idx = self.get_chunk_start(signer.start, start_offset)?;
-            let default_size = self.size();
 
             let buf = self.context.get_cropped_buffer(
-                signer.pos.unwrap_or_default(),
-                signer.size.unwrap_or(default_size),
+                signer.pos,
+                signer.size,
                 start_idx..self.context.len(),
                 &signer.channels,
             )?;
@@ -458,15 +461,8 @@ pub mod sign {
             let start = signer.start;
             let end = self.timestamp;
 
-            let channels = self
-                .raw
-                .audio
-                .as_ref()
-                .map(AudioSlice::channels)
-                .unwrap_or_default();
-
             Ok(signer
-                .sign(buf, default_size, channels)
+                .sign(buf)
                 .and_then(move |res| async move { Ok(SignedInterval::new(start, end, res)) }))
         }
     }
@@ -478,7 +474,7 @@ pub mod sign {
     {
         /// This calls the `sign_with` function stored in [SigningContext] and returns the result
         /// as an iterator
-        pub async fn request_sign_info(&self) -> Vec<ChunkSigner<S>> {
+        pub async fn request_sign_info(&self) -> Vec<ChunkSignerBuilder<S>> {
             self.state
                 .context
                 .controller
@@ -494,11 +490,10 @@ pub mod sign {
         ) -> Pin<Box<dyn Stream<Item = Result<SignedInterval, SigningError>> + Send>> {
             let sign_info = self.request_sign_info().await;
 
-            let res = stream::iter(
-                sign_info
-                    .into_iter()
-                    .map(move |si| self.frame.sign(si, self.state.offset)),
-            )
+            let res = stream::iter(sign_info.into_iter().map(move |si| {
+                self.frame
+                    .sign(si.build(&self.frame.raw), self.state.offset)
+            }))
             .then(|res| async {
                 match res {
                     Ok(fut) => fut.await.map_err(SigningError::from),
@@ -525,8 +520,11 @@ pub mod verification {
     };
 
     use crate::{
-        file::SignedInterval, spec::CHUNK_LENGTH_RANGE, utils::CredentialStore,
-        video::verify::SignatureState, SignFile,
+        file::SignedInterval,
+        spec::CHUNK_LENGTH_RANGE,
+        utils::CredentialStore,
+        video::{verify::SignatureState, Frame},
+        SignFile,
     };
 
     use super::*;
@@ -625,25 +623,26 @@ pub mod verification {
 
             let sig = &chunk.val;
 
+            // Save the credential first before doing any checking
+            let mut credentials = self.state.context.credentials.lock().await;
+            let signer = credentials.normalise(sig.presentation.clone()).await;
+
             let length = chunk.stop() - chunk.start();
             if !CHUNK_LENGTH_RANGE.contains(&length) {
                 return SignatureState::Invalid(SigOperationError::InvalidChunkSize(length).into());
+            } else if chunk.start() < self.state.offset {
+                return SignatureState::Invalid(
+                    SigOperationError::OutOfRange(chunk.start(), chunk.stop()).into(),
+                );
             }
 
-            let frames_buf = self.frame.get_cropped_buffer(
-                sig.pos,
-                sig.size,
-                0..end_frame - 1,
-                &Some(sig.channels.clone()),
-            );
+            let frames_buf =
+                self.frame
+                    .get_cropped_buffer(sig.pos, sig.size, 0..end_frame, &sig.channels);
             let frames_buf = match frames_buf {
                 Ok(b) => b,
                 Err(e) => return SignatureState::Invalid(e.into()),
             };
-
-            let mut credentials = self.state.context.credentials.lock().await;
-
-            let signer = credentials.normalise(sig.presentation.clone()).await;
 
             SignatureState::from_signer(
                 signer,

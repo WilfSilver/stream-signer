@@ -9,7 +9,10 @@ use futures::{future::BoxFuture, FutureExt};
 use stream_signer::{
     spec::MAX_CHUNK_LENGTH,
     time::Timestamp,
-    video::{sign::Controller, ChunkSigner, FrameState},
+    video::{
+        sign::{ChunkSignerBuilder, Controller},
+        ChunkSigner, FrameState,
+    },
 };
 use testlibs::identity::TestIdentity;
 use tokio::sync::Mutex;
@@ -42,7 +45,7 @@ impl SignController {
 }
 
 impl Controller<TestIdentity> for SignController {
-    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSigner<TestIdentity>>> {
+    fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSignerBuilder<TestIdentity>>> {
         async move {
             let time = state.time;
 
@@ -70,7 +73,7 @@ impl Controller<TestIdentity> for SignController {
                 || next_frame_time >= MAX_CHUNK_LENGTH
                 || is_last
             {
-                let res = ChunkSigner::new(*last_sign, self.signer.clone())
+                let res = ChunkSigner::build(*last_sign, self.signer.clone())
                     .with_is_ref(*last_sign != Timestamp::ZERO);
 
                 self.sign_ctrl.store(false, Ordering::Relaxed);
