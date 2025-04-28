@@ -11,7 +11,7 @@ use crate::{
 
 use super::DecodedFrame;
 
-/// An interface to make it easier interacting with the [Frame] and other
+/// An interface to make it easier interacting with the [super::Frame] and other
 /// aspects of the video
 ///
 /// Note this is slightly different to [crate::video::manager::FrameManager], as

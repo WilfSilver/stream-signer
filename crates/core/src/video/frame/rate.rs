@@ -105,9 +105,6 @@ where
     /// The return type is [f64] so that the caller can then determine how they
     /// wish to convert to indexes in different contexts
     ///
-    /// It is highly recommended that you use the [crate::utils::float::RoundUnlessClose]
-    /// trait with this output due to precision issues when using Duratoin
-    ///
     /// ```
     /// use std::time::Duration;
     /// use stream_signer::video::Framerate;
