@@ -190,7 +190,7 @@ impl VerifyFeed {
                 ctrl.wait_if_paused(&info.state.pipe).await;
 
                 event_sink.add_idle_callback(move |data: &mut AppData| {
-                    data.video.update_frame(info.state.clone());
+                    data.video.update_frame(&info.state);
                     data.video.options.sigs =
                         Vector::from_iter(info.sigs.iter().cloned().map(SigState));
                 });

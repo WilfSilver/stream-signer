@@ -15,6 +15,6 @@ pub mod verify;
 
 pub use error::*;
 pub use frame::{Frame, FrameState, Framerate};
-pub use pipeline::{wrappers::Pipeline, SignPipeline};
+pub use pipeline::{SignPipeline, wrappers::Pipeline};
 #[cfg(feature = "signing")]
 pub use sign::{ChunkSigner, Signer, SigningError};

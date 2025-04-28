@@ -11,8 +11,8 @@ use gst_app::AppSink;
 use crate::file::Timestamp;
 
 use super::{
-    audio::AudioBuffer, frame::FrameWithAudio, manager::PipeState, pipeline::PipeInitiator,
-    utils::into_glib_error, Frame,
+    Frame, audio::AudioBuffer, frame::FrameWithAudio, manager::PipeState, pipeline::PipeInitiator,
+    utils::into_glib_error,
 };
 
 /// A simple iterator to extract every frame in a given pipeline.
@@ -42,6 +42,7 @@ pub struct FrameIter<VC> {
     /// Stores the timestamp of the first frame so we can normalise it to start
     /// at 0
     pts_offset: Option<Duration>,
+    idx: usize,
 }
 
 pub type SampleWithState<VC> = (Arc<PipeState<VC>>, Result<FrameWithAudio, glib::Error>);
@@ -55,6 +56,7 @@ impl<VC> FrameIter<VC> {
             timeout: gst::ClockTime::SECOND,
             fused: false,
             pts_offset: None,
+            idx: 0,
         })
     }
 
@@ -195,8 +197,11 @@ impl<VC> Iterator for FrameIter<VC> {
                         }
                     }
                 }
+                let idx = self.idx;
+                self.idx += 1;
 
                 Some(Ok(FrameWithAudio {
+                    idx,
                     frame,
                     audio: self.audio_buffer.pop_until(end_timestamp),
                     is_last: video_sink.is_eos(),

@@ -50,8 +50,8 @@ impl Widget<Option<FrameWithIdx>> for FrameWidget {
         if let Some(info) = data {
             let image = info.get_curr_image(ctx);
 
-            let f_width = info.frame.width() as f64;
-            let f_height = info.frame.height() as f64;
+            let f_width = info.info.frame.width() as f64;
+            let f_height = info.info.frame.height() as f64;
 
             let size = ctx.size();
             let s_width = size.width;

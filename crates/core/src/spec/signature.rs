@@ -1,5 +1,5 @@
-use base64::{engine::general_purpose::STANDARD_NO_PAD, Engine};
-use serde::{de::Error, Deserialize, Deserializer, Serialize, Serializer};
+use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error};
 
 use super::{PresentationOrId, Vec2u};
 

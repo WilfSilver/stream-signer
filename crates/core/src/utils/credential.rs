@@ -8,7 +8,7 @@ use identity_iota::{
         JwtPresentationValidatorUtils, JwtValidationError, SubjectHolderRelationship,
     },
     did::{CoreDID, DID},
-    document::{verifiable::JwsVerificationOptions, DIDUrlQuery},
+    document::{DIDUrlQuery, verifiable::JwsVerificationOptions},
     prelude::Resolver,
     resolver::Error as ResolverError,
     verification::{jwk::Jwk, jws::Decoder},

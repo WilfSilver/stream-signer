@@ -1,6 +1,6 @@
-use futures::{future::BoxFuture, FutureExt};
+use futures::{FutureExt, future::BoxFuture};
 
-use crate::video::{sign::ChunkSignerBuilder, FrameState, Signer};
+use crate::video::{FrameState, Signer, sign::ChunkSignerBuilder};
 
 /// This has a slightly different interface from [super::Controller] and
 /// focuses on allowing to have multiple [SingleController]s to be added

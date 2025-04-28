@@ -11,13 +11,12 @@ use futures::{StreamExt, TryStreamExt};
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use serde_json::json;
 use stream_signer::{
+    SignFile, SignPipeline,
     spec::Vec2u,
     video::{
-        sign,
+        SigOperationError, SigningError, sign,
         verify::{InvalidSignatureError, SignatureState},
-        SigOperationError, SigningError,
     },
-    SignFile, SignPipeline,
 };
 use testlibs::{
     client::{get_client, get_resolver},
@@ -34,6 +33,88 @@ async fn sign_and_verify_embedding() -> Result<(), Box<dyn Error>> {
             .with_embedding(Vec2u::new(10, 10), Vec2u::new(100, 100))
     })
     .await
+}
+
+#[tokio::test]
+async fn sign_with_video_verify_with_embedded() -> Result<(), Box<dyn Error>> {
+    // Please note this requires lossless audio
+
+    gst::init()?;
+
+    let client = get_client();
+    let issuer = TestIssuer::new(client.clone()).await?;
+    let resolver = get_resolver(client);
+
+    let identity = TestIdentity::new(&issuer, |id| {
+        Subject::from_json_value(json!({
+          "id": id.as_str(),
+          "name": "Alice",
+          "degree": {
+            "type": "BachelorDegree",
+            "name": "Bachelor of Science and Arts",
+          },
+          "GPA": "4.0",
+        }))
+        .expect("Invalid subject")
+    })
+    .await?;
+
+    let filepath = test_video(videos::BIG_BUNNY);
+
+    let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+    let signs = pipe
+        .sign_with(sign::IntervalController::build(
+            Arc::new(identity),
+            ONE_HUNDRED_MILLIS,
+        ))?
+        .try_collect::<Vec<_>>()
+        .await?;
+
+    // Change the channels in the specification to be the other one
+    let signfile = signs
+        .iter()
+        .cloned()
+        .map(|mut i| {
+            i.val.pos = Vec2u::new(25, 25);
+            i
+        })
+        .collect::<SignFile>();
+
+    let filepath = test_video(videos::BIG_BUNNY_EMBED);
+
+    let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+    let mut count = 0;
+    pipe.verify(resolver.clone(), signfile)?
+        .for_each(|v| {
+            let v = match v {
+                Ok(v) => v,
+                Err(e) => {
+                    panic!("Frame was invalid: {e}");
+                }
+            };
+
+            count += 1;
+
+            async move {
+                for s in &v.sigs {
+                    if skip_loading(s).await {
+                        continue;
+                    }
+
+                    assert!(
+                        matches!(s, SignatureState::Verified(_)),
+                        "{s:?} is still valid on a different video with different channel"
+                    );
+                }
+            }
+        })
+        .await;
+
+    assert!(count > 0, "Signatures have been validated");
+
+    Ok(())
 }
 
 #[tokio::test]

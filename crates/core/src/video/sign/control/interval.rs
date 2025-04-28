@@ -2,19 +2,19 @@ use std::{
     future,
     ops::Range,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
 
-use futures::{future::BoxFuture, FutureExt};
+use futures::{FutureExt, future::BoxFuture};
 
 use crate::{
     file::Timestamp,
     spec::Vec2u,
     utils::TimeRange,
-    video::{sign::ChunkSignerBuilder, ChunkSigner, FrameState, Signer},
+    video::{ChunkSigner, FrameState, Signer, sign::ChunkSignerBuilder},
 };
 
 use super::{Controller, SingleController};
@@ -27,7 +27,8 @@ pub struct Embedding {
     pub size: Vec2u,
 }
 
-/// A controller that creates chunks of a set size.
+/// A controller that creates chunks of a set size. Works in milliseconds due
+/// to notes mentioned in [TimeRange::crosses_interval]
 ///
 /// NOTE: the interval is not validated against the
 /// [crate::spec::MAX_CHUNK_LENGTH] or [crate::spec::MIN_CHUNK_LENGTH], if
@@ -170,14 +171,14 @@ impl<S: Signer + 'static> SingleController<S> for IntervalController<S> {
         };
 
         future::ready({
+            let cross_point = time.crosses_interval(self.interval);
             // Note the is of is_last here means that the last chunk will
             // always overlap with another. This was mostly done to save time
-            if (!(time - state.start_offset).is_start() && (time % self.interval).is_first())
+            if (!(state.time - state.start_offset).is_start() && cross_point.is_some())
                 || state.is_last
             {
-                let start = state
-                    .time
-                    .start()
+                let chunk_end = cross_point.unwrap_or(state.time.end());
+                let start = chunk_end
                     .checked_sub(self.interval)
                     .unwrap_or_default()
                     .into();

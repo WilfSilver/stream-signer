@@ -1,6 +1,6 @@
 use futures::future::BoxFuture;
 
-use crate::video::{sign::ChunkSignerBuilder, FrameState, Signer};
+use crate::video::{FrameState, Signer, sign::ChunkSignerBuilder};
 
 /// This trait signifies an structure which can be used to control how a
 /// signature is signed

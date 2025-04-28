@@ -1,7 +1,7 @@
 //! This provides an wrapper around [gst_video::VideoFrame] to make it easier
 //! to just get the buffer of the frame and it's related information
 
-use std::time::Duration;
+use std::{ops::Deref, sync::Arc, time::Duration};
 
 use gst_video::VideoFrameExt;
 
@@ -10,15 +10,68 @@ pub use image::GenericImageView;
 use crate::{
     file::Timestamp,
     spec::Vec2u,
-    video::{audio::AudioSlice, SigOperationError},
+    video::{SigOperationError, StreamError, audio::AudioSlice},
 };
 
 use super::{Framerate, ImageFns};
 
+/// A utility struct to help dealing with Arced FrameWithAudio to allow us to
+/// not to clone it while also decoding it without moving out of the [Arc]
+#[derive(Debug, Clone)]
+pub struct DecodedFrame<const OK: bool>(Arc<Result<FrameWithAudio, StreamError>>);
+
+impl From<Result<FrameWithAudio, StreamError>> for DecodedFrame<false> {
+    fn from(value: Result<FrameWithAudio, StreamError>) -> Self {
+        Self(Arc::new(value))
+    }
+}
+
+impl From<Arc<Result<FrameWithAudio, StreamError>>> for DecodedFrame<false> {
+    fn from(value: Arc<Result<FrameWithAudio, StreamError>>) -> Self {
+        Self(value)
+    }
+}
+
+impl DecodedFrame<false> {
+    pub fn check(self) -> Result<DecodedFrame<true>, StreamError> {
+        if let Err(e) = &self.0.as_ref() {
+            Err(e.clone())
+        } else {
+            Ok(DecodedFrame::<true>(self.0))
+        }
+    }
+
+    pub fn check_ref(&self) -> Result<&DecodedFrame<true>, StreamError> {
+        if let Err(e) = &self.0.as_ref() {
+            Err(e.clone())
+        } else {
+            Ok(unsafe { &*(self as *const DecodedFrame<false> as *const DecodedFrame<true>) })
+        }
+    }
+}
+
+impl Deref for DecodedFrame<false> {
+    type Target = Result<FrameWithAudio, StreamError>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Deref for DecodedFrame<true> {
+    type Target = FrameWithAudio;
+
+    fn deref(&self) -> &Self::Target {
+        self.0.as_ref().as_ref().unwrap()
+    }
+}
+
 /// This is a basic structure used internally to store both the frame and audio
 /// in one place as well as some additional context.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FrameWithAudio {
+    /// The index in which the frame appeared
+    pub idx: usize,
     /// The wrapper for the [gst_video::VideoFrame] to get access it its
     /// information
     pub frame: Frame,
@@ -200,19 +253,19 @@ impl Frame {
     }
 }
 
-impl Clone for Frame {
-    /// Clone this video frame. This operation is cheap because it does not clone the underlying
-    /// data (it actually relies on gstreamer's refcounting mechanism)
-    fn clone(&self) -> Self {
-        let buffer = self.raw.buffer_owned();
-        let frame = gst_video::VideoFrame::from_buffer_readable(buffer, self.raw.info())
-            .expect("Failed to map buffer readable");
-        Self {
-            raw: frame,
-            pts: self.pts,
-        }
-    }
-}
+// impl Clone for Frame {
+//     /// Clone this video frame. This operation is cheap because it does not clone the underlying
+//     /// data (it actually relies on gstreamer's refcounting mechanism)
+//     fn clone(&self) -> Self {
+//         let buffer = self.raw.buffer_owned();
+//         let frame = gst_video::VideoFrame::from_buffer_readable(buffer, self.raw.info())
+//             .expect("Failed to map buffer readable");
+//         Self {
+//             raw: frame,
+//             pts: self.pts,
+//         }
+//     }
+// }
 
 impl GenericImageView for Frame {
     type Pixel = image::Rgb<u8>;

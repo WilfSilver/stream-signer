@@ -8,8 +8,8 @@ use futures::{StreamExt, TryStreamExt};
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use serde_json::json;
 use stream_signer::{
-    video::{sign, verify::SignatureState},
     SignFile, SignPipeline,
+    video::{sign, verify::SignatureState},
 };
 use testlibs::{
     client::{get_client, get_resolver},
