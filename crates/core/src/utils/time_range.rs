@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     ops::{self, Bound, Range, RangeBounds},
     time::Duration,
 };
@@ -24,22 +25,30 @@ use crate::file::Timestamp;
 /// ```
 /// use std::time::Duration;
 /// use stream_signer::{file::Timestamp, utils::TimeRange};
-/// let tr: TimeRange = TimeRange::new(Timestamp::from_millis(495), Duration::from_secs_f64(0.0995));
+/// let tr: TimeRange = TimeRange::new(Timestamp::from_millis(495), Duration::from_millis(99));
 ///
-/// assert_eq!(tr % Duration::from_millis(100), TimeRange::new(Timestamp::from_millis(95), Duration::from_secs_f64(0.0995)));
-/// assert!((tr % Duration::from_millis(100)).is_start());
+/// assert!(tr.crosses_interval(Duration::from_millis(100)).is_some());
+/// assert!(tr.contains(&Timestamp::from_millis(500)));
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct TimeRange {
     start: Timestamp,
     end: Timestamp,
+}
+
+impl Debug for TimeRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.start.fmt(f)?;
+        write!(f, "..")?;
+        self.end.fmt(f)
+    }
 }
 
 impl TimeRange {
     pub fn new(start: Timestamp, frame_duration: Duration) -> Self {
         Self {
             start,
-            end: Timestamp::from(*start + frame_duration),
+            end: Timestamp(*start + frame_duration),
         }
     }
 
@@ -54,7 +63,7 @@ impl TimeRange {
 
     /// Returns the current object as a range from the start time to the end
     /// time of the frame being displayed
-    pub fn range(&self) -> Range<Timestamp> {
+    pub const fn range(&self) -> Range<Timestamp> {
         self.start..self.end
     }
 
@@ -68,8 +77,15 @@ impl TimeRange {
     }
 
     /// Returns the timestamp at the start of the region
-    pub fn start(&self) -> Timestamp {
+    #[inline]
+    pub const fn start(&self) -> Timestamp {
         self.start
+    }
+
+    /// Returns the timestamp at the end of the region
+    #[inline]
+    pub const fn end(&self) -> Timestamp {
+        self.end
     }
 
     /// Returns the duration of the frame
@@ -77,15 +93,24 @@ impl TimeRange {
         self.end - self.start
     }
 
-    /// This checks if the given value
-    pub fn multiple_of(&self, value: Duration) -> bool {
-        let m = self.start % value;
-        m <= self.frame_duration().into()
-    }
-
     /// Returns if the frame is the starting frame
     pub fn is_start(&self) -> bool {
         self.previous().is_none()
+    }
+
+    /// This complies with specification with signing on the frame that crosses
+    /// a boundary.
+    ///
+    /// This can be used to sign in intervals.
+    ///
+    /// Please note that this works with milliseconds due to GStreamer rounding
+    /// to the nearest millisecond for presentation times
+    ///
+    /// Returns the time at which it crosses if it does
+    pub fn crosses_interval(&self, interval: Duration) -> Option<Timestamp> {
+        let end = (self.start % interval) + self.frame_duration();
+        let rel_cross = end.round_millis().checked_sub(interval)?;
+        Some(self.end - rel_cross)
     }
 
     /// This returns if this is the first frame, it works within the closest

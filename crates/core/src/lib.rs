@@ -33,7 +33,7 @@ pub mod spec;
 pub mod utils;
 pub mod video;
 
-pub use crate::file::{time, SignFile};
+pub use crate::file::{SignFile, time};
 pub use video::SignPipeline;
 
 pub use futures::{StreamExt, TryStreamExt};

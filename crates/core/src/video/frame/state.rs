@@ -1,13 +1,15 @@
 //! This contains the different structures that we may want to store about a
 //! frame.
 
+use std::sync::Arc;
+
 use crate::{
     file::Timestamp,
     utils::TimeRange,
-    video::{audio::AudioSlice, pipeline::SrcInfo, Pipeline},
+    video::{Pipeline, pipeline::SrcInfo},
 };
 
-use super::Frame;
+use super::DecodedFrame;
 
 /// An interface to make it easier interacting with the [Frame] and other
 /// aspects of the video
@@ -29,7 +31,7 @@ use super::Frame;
 /// impl Controller<TestIdentity> for MyController {
 ///     fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSignerBuilder<TestIdentity>>> {
 ///         async move {
-///             let frame = &state.frame;
+///             let frame = &state.info.frame;
 ///             let duration = state.video.duration;
 ///
 ///             // ... await ...
@@ -59,14 +61,16 @@ use super::Frame;
 /// impl Controller<TestIdentity> for MyController {
 ///     fn get_chunks(&self, state: FrameState) -> BoxFuture<Vec<ChunkSignerBuilder<TestIdentity>>> {
 ///         async move {
-///             let frame = &state.frame;
+///             let frame = &state.info.frame;
 ///             let duration = state.video.duration;
 ///
 ///             // ... await ...
 ///
 ///             // Sign every 100 milliseconds or on the last frame
 ///             let time = state.time;
-///             if (!time.is_start() && (time % Duration::from_millis(100)).is_first()) || state.is_last {
+///             let cross_point = time.crosses_interval(Duration::from_millis(100));
+///             if (!time.is_start() && cross_point.is_some()) || state.is_last {
+///                 let chunk_end = cross_point.unwrap_or(state.time.end());
 ///                 vec![todo!()]
 ///             } else {
 ///                 vec![]
@@ -75,22 +79,18 @@ use super::Frame;
 ///     }
 /// }
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct FrameState {
     /// Stores information about the video itself
     pub video: SrcInfo,
 
     /// This allows you to directly interact and query the pipeline (and
     /// pause it if needed)
-    pub pipe: Pipeline,
+    pub pipe: Arc<Pipeline>,
 
-    /// Stores the frame itself, it is okay to clone the frame due to the fact
-    /// [Frame::clone] does not clone the underlying object
-    pub frame: Frame,
-
-    /// If there is audio within the processed video, this will have all the
-    /// audio data that is played during the current frame
-    pub audio: Option<AudioSlice>,
+    /// Stores both the frame as well as the audio, and can be downcast to
+    /// [super::FrameWithAudio]
+    pub info: DecodedFrame<true>,
 
     /// This is set to try if the current frame is the last frame of the video.
     /// It's useful for making sure that the last couple frames are always

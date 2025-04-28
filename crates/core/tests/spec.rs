@@ -8,13 +8,12 @@ use futures::{StreamExt, TryStreamExt};
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use serde_json::json;
 use stream_signer::{
+    SignFile, SignPipeline,
     spec::{MAX_CHUNK_LENGTH, MIN_CHUNK_LENGTH},
     video::{
-        sign,
+        SigOperationError, SigningError, sign,
         verify::{InvalidSignatureError, SignatureState},
-        SigOperationError, SigningError,
     },
-    SignFile, SignPipeline,
 };
 use testlibs::{
     client::{get_client, get_resolver},
@@ -58,12 +57,15 @@ async fn sign_too_large_chunk() -> Result<(), Box<dyn Error>> {
         .try_collect::<Vec<_>>()
         .await;
 
+    // Add the length of a frame due to how IntervalController works
+    let expected_chunk_size = MAX_CHUNK_LENGTH + Duration::from_millis(33);
+
     assert!(
         matches!(
             res,
             Err(SigningError::Operation(
                 SigOperationError::InvalidChunkSize(l)
-            )) if l == length
+            )) if l == expected_chunk_size
         ),
         "{:?} reported invalid chunk size of {length:.2?}",
         res.map(|mut v| v.pop())
@@ -104,11 +106,15 @@ async fn sign_too_small_chunk() -> Result<(), Box<dyn Error>> {
         .try_collect::<Vec<_>>()
         .await;
 
+    // Add the length of a frame and minus some offset due to how IntervalController
+    // works
+    const EXPECTED_LENGTH: Duration = Duration::from_millis(36);
+
     assert!(
         matches!(
             res,
             Err(SigningError::Operation(
-                SigOperationError::InvalidChunkSize(LENGTH)
+                SigOperationError::InvalidChunkSize(EXPECTED_LENGTH)
             ))
         ),
         "{:?} reported an invalid chunk size of {LENGTH:?}",

@@ -5,12 +5,11 @@ use futures::{StreamExt, TryStreamExt};
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use serde_json::json;
 use stream_signer::{
-    video::{
-        sign,
-        verify::{InvalidSignatureError, SignatureState},
-        SigOperationError, SigningError,
-    },
     SignFile, SignPipeline,
+    video::{
+        SigOperationError, SigningError, sign,
+        verify::{InvalidSignatureError, SignatureState},
+    },
 };
 use testlibs::{
     client::{get_client, get_resolver},

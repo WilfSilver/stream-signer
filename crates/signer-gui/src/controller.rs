@@ -61,7 +61,7 @@ impl Controller<TestIdentity> for SignController {
             let is_last = state.is_last;
             self.event_sink
                 .add_idle_callback(move |data: &mut AppData| {
-                    data.video.update_frame(state);
+                    data.video.update_frame(&state);
                 });
 
             let mut last_sign = self.last_sign.lock().await;

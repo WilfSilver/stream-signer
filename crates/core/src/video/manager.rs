@@ -15,9 +15,9 @@ use tokio::sync::Mutex;
 use crate::{file::Timestamp, spec::Vec2u, utils::TimeRange};
 
 use super::{
-    frame::FrameWithAudio,
-    pipeline::{PipeInitiator, SrcInfo},
     FrameState, Framerate, Pipeline, SigOperationError, StreamError,
+    frame::DecodedFrame,
+    pipeline::{PipeInitiator, SrcInfo},
 };
 
 /// This trait is designed to make it easier to extract the exact bytes which
@@ -29,7 +29,7 @@ pub trait FrameBuffer {
     fn with_frames<'a>(
         &'a self,
         range: Range<usize>,
-    ) -> Box<dyn Iterator<Item = &'a FrameWithAudio> + 'a>;
+    ) -> Box<dyn Iterator<Item = &'a DecodedFrame<true>> + 'a>;
 
     /// This uses the [FrameBuffer::with_frames] to return the exact buffer which
     /// should be signed for a given position and size of the viewing window
@@ -92,10 +92,10 @@ impl<VC, FC> PipeManager<VC, FC> {
     /// information
     pub fn new(
         state: Arc<PipeState<VC>>,
-        frame_info: (usize, Result<FrameWithAudio, StreamError>, FC),
+        frame_info: (DecodedFrame<false>, FC),
     ) -> Result<Self, StreamError> {
         Ok(Self {
-            frame: Arc::new(FrameManager::new(frame_info.0, frame_info.1?, frame_info.2)),
+            frame: Arc::new(FrameManager::new(frame_info.0.check()?, frame_info.1)),
             state,
         })
     }
@@ -108,7 +108,7 @@ impl<VC, FC> PipeManager<VC, FC> {
 
     /// This uses its information to convert a given [Timestamp] to a frame
     /// index relative to any buffers stored
-    pub fn convert_to_frames(&self, time: Timestamp) -> usize {
+    pub fn convert_to_frames(&self, time: Timestamp) -> f64 {
         time.into_frames(self.fps(), self.state.offset)
     }
 
@@ -125,11 +125,10 @@ impl<VC, FC> PipeManager<VC, FC> {
                 .await
                 .clone()
                 .expect("Source information was not set"),
-            audio: self.frame.raw.audio.clone(),
+            info: self.frame.raw.clone(),
             is_last: self.frame.raw.is_last,
             pipe: self.state.pipe.clone(),
-            frame: self.frame.raw.frame.clone(),
-            frame_idx: self.frame.idx,
+            frame_idx: self.frame.raw.idx,
             time: TimeRange::new(exact_time, self.fps().frame_time()),
             start_offset: self.state.offset,
         }
@@ -145,7 +144,7 @@ pub struct PipeState<VC> {
     pub src: Arc<Mutex<Option<SrcInfo>>>,
 
     /// The raw gstreamer pipelien
-    pub pipe: Pipeline,
+    pub pipe: Arc<Pipeline>,
     /// The start offset time for the video
     pub offset: Timestamp,
     /// Any extra context which is stored about the state
@@ -171,7 +170,7 @@ impl<VC> PipeState<VC> {
             src: init.src,
             video_sink: init.video_sink,
             audio_sink: init.audio_sink,
-            pipe: init.pipe,
+            pipe: Arc::new(init.pipe),
             offset: init.offset,
             context,
         };
@@ -195,7 +194,8 @@ impl<VC> PipeState<VC> {
         self.pipe.play()
     }
 
-    /// Sets the pipeline to the [gst::State::Null] state
+    /// Sets the pipeline to the [gst::State::Null] state, via [gst::State::Paused]
+    /// and [gst::State::Ready] to help clear memory leaks
     ///
     /// This is required to stop any memory leaks when the pipeline ends
     pub(super) fn close(&self) -> Result<(), glib::Error> {
@@ -267,27 +267,24 @@ impl<VC> PipeState<VC> {
 /// This stores specific information about the state of the current frame
 #[derive(Debug)]
 pub struct FrameManager<FC> {
-    /// The relative index to the start of the video itself
-    pub idx: usize,
-
     /// The raw frame information
-    pub raw: FrameWithAudio,
+    pub raw: DecodedFrame<true>,
 
     /// The timestamp which this frame appears at, calculated from the start
     /// offset and the index itself
-    pub timestamp: Timestamp,
+    pub time: TimeRange,
     /// Any extra context about the frame required
     pub context: FC,
 }
 
 impl<FC> FrameManager<FC> {
-    pub fn new(idx: usize, frame: FrameWithAudio, context: FC) -> Self {
+    pub fn new(frame: DecodedFrame<true>, context: FC) -> Self {
         let timestamp = frame.frame.get_timestamp();
+        let time = TimeRange::new(timestamp, frame.frame.get_duration());
 
         Self {
-            idx,
             raw: frame,
-            timestamp,
+            time,
             context,
         }
     }
@@ -305,15 +302,16 @@ pub mod sign {
 
     use std::{collections::VecDeque, future::Future, marker::PhantomData, pin::Pin};
 
-    use futures::{stream, Stream, StreamExt, TryFutureExt};
+    use futures::{Stream, StreamExt, TryFutureExt, stream};
     use identity_iota::storage::JwkStorageDocumentError;
 
     use crate::{
         file::SignedInterval,
         spec::CHUNK_LENGTH_RANGE,
         video::{
-            sign::{ChunkSignerBuilder, Controller},
             ChunkSigner, Signer, SigningError, StreamError,
+            frame::FrameWithAudio,
+            sign::{ChunkSignerBuilder, Controller},
         },
     };
 
@@ -347,12 +345,12 @@ pub mod sign {
 
     /// This is the extra context which is used by [FrameState] and stores a
     /// cache of all the previous frames before it
-    type MyFrameBuffer = Box<[FrameWithAudio]>;
+    type MyFrameBuffer = Box<[DecodedFrame<true>]>;
     impl FrameBuffer for MyFrameBuffer {
         fn with_frames<'a>(
             &'a self,
             range: Range<usize>,
-        ) -> Box<dyn Iterator<Item = &'a FrameWithAudio> + 'a> {
+        ) -> Box<dyn Iterator<Item = &'a DecodedFrame<true>> + 'a> {
             Box::new(self[range].iter())
         }
     }
@@ -363,18 +361,14 @@ pub mod sign {
     type MyPipeState<S, C> = Arc<PipeState<SigningContext<S, C>>>;
 
     type StatesPair<S, C> = (MyPipeState<S, C>, Result<FrameWithAudio, StreamError>);
-    type EnumeratedStatesPair<S, C> = (usize, StatesPair<S, C>);
-    type SigningItem<S, C> = (
-        EnumeratedStatesPair<S, C>,
-        Arc<Mutex<VecDeque<FrameWithAudio>>>,
-    );
+    type SigningItem<S, C> = (StatesPair<S, C>, Arc<Mutex<VecDeque<DecodedFrame<true>>>>);
 
     /// Makes it easily create a manager from an iterator, it is done as such
     /// mostly to make it easier to integrate into existing solutions e.g.
     ///
     /// TODO: Examples
     pub async fn manage<S, C>(
-        ((i, (state, frame)), buffer): SigningItem<S, C>,
+        ((state, frame), buffer): SigningItem<S, C>,
     ) -> Result<Manager<S, C>, SigningError>
     where
         S: Signer + 'static,
@@ -389,7 +383,9 @@ pub mod sign {
             buffer.pop_front();
         }
 
-        if let Ok(frame) = &frame {
+        // NOTE: we don't use the frame later on in our calculations
+        let frame: DecodedFrame<false> = frame.into();
+        if let Ok(frame) = frame.clone().check() {
             buffer.push_back(frame.clone());
         }
 
@@ -398,30 +394,24 @@ pub mod sign {
         let mut frames = Vec::new();
         frames.reserve_exact(buffer.len());
 
-        buffer.iter().cloned().for_each(|it| frames.push(it));
+        for f in buffer.iter() {
+            frames.push(f.clone());
+        }
 
-        Ok(PipeManager::new(
-            state,
-            (i, frame, frames.into_boxed_slice()),
-        )?)
+        Ok(PipeManager::new(state, (frame, frames.into_boxed_slice()))?)
     }
 
     impl FrameManager<MyFrameBuffer> {
         /// This calculates the starting index for the frame at a given
         /// timestamp relative to the [MyFrameBuffer]
-        fn get_chunk_start(
-            &self,
-            start: Timestamp,
-            start_offset: Timestamp,
-        ) -> Result<usize, SigOperationError> {
-            self.context
-                .len()
-                .checked_sub(
-                    self.idx + 1 // TODO: WHYY is it + 1
-                        - self.timestamp.excess_frames(self.raw.frame.fps())
-                        - start.into_frames(self.raw.frame.fps(), start_offset),
-                )
-                .ok_or(SigOperationError::OutOfRange(start, self.timestamp))
+        fn get_chunk_start(&self, start: Timestamp) -> Result<usize, SigOperationError> {
+            let context_start = self.context[0].frame.get_timestamp();
+            let Some(rel_time) = start.floor_millis().checked_sub(*context_start) else {
+                return Err(SigOperationError::OutOfRange(start, self.time.end()));
+            };
+            Ok(Timestamp::from(rel_time)
+                .into_frames(self.raw.frame.fps(), Timestamp::ZERO)
+                .ceil() as usize)
         }
 
         /// This gets the buffer the [ChunkSigner] is wanting and calls [ChunkSigner::sign]
@@ -439,27 +429,31 @@ pub mod sign {
         where
             S: Signer + 'static,
         {
-            let Some(length) = self.timestamp.checked_sub(*signer.start) else {
-                return Err(SigOperationError::OutOfRange(signer.start, self.timestamp));
+            // Floor the millis here with the length as that is what the SRT
+            // file will do
+            let Some(length) = self.time.end().floor_millis().checked_sub(*signer.start) else {
+                return Err(SigOperationError::OutOfRange(signer.start, self.time.end()));
             };
 
             if !CHUNK_LENGTH_RANGE.contains(&length) {
                 return Err(SigOperationError::InvalidChunkSize(length));
             } else if signer.start < start_offset {
-                return Err(SigOperationError::OutOfRange(signer.start, self.timestamp));
+                return Err(SigOperationError::OutOfRange(signer.start, self.time.end()));
             }
 
-            let start_idx = self.get_chunk_start(signer.start, start_offset)?;
+            let start_idx = self.get_chunk_start(signer.start)?;
+            let end = self.context.len() - self.time.end().excess_frames(self.raw.frame.fps());
 
             let buf = self.context.get_cropped_buffer(
                 signer.pos,
                 signer.size,
-                start_idx..self.context.len(),
+                start_idx..end,
                 &signer.channels,
             )?;
 
             let start = signer.start;
-            let end = self.timestamp;
+            // We want to end the chunk at the end of this frame
+            let end = self.time.end();
 
             Ok(signer
                 .sign(buf)
@@ -490,14 +484,15 @@ pub mod sign {
         ) -> Pin<Box<dyn Stream<Item = Result<SignedInterval, SigningError>> + Send>> {
             let sign_info = self.request_sign_info().await;
 
-            let res = stream::iter(sign_info.into_iter().map(move |si| {
-                self.frame
-                    .sign(si.build(&self.frame.raw), self.state.offset)
-            }))
-            .then(|res| async {
-                match res {
-                    Ok(fut) => fut.await.map_err(SigningError::from),
-                    Err(e) => Err(e.into()),
+            let frame = self.frame;
+            let offset = self.state.offset;
+            let res = stream::iter(sign_info).then(move |si| {
+                let frame = frame.clone();
+                async move {
+                    match frame.sign(si.build(&frame.raw), offset) {
+                        Ok(fut) => fut.await.map_err(SigningError::from),
+                        Err(e) => Err(e.into()),
+                    }
                 }
             });
 
@@ -513,18 +508,18 @@ pub mod verification {
 
     use std::collections::HashMap;
 
-    use futures::{stream, Stream, StreamExt};
+    use futures::{Stream, StreamExt, stream};
     use identity_iota::{
         prelude::Resolver,
         verification::jws::{JwsAlgorithm, VerificationInput},
     };
 
     use crate::{
+        SignFile,
         file::SignedInterval,
         spec::CHUNK_LENGTH_RANGE,
         utils::CredentialStore,
-        video::{verify::SignatureState, Frame},
-        SignFile,
+        video::{Frame, verify::SignatureState},
     };
 
     use super::*;
@@ -563,7 +558,7 @@ pub mod verification {
         }
     }
 
-    pub type FutureFramesContext = Box<[Arc<(usize, Result<FrameWithAudio, StreamError>)>]>;
+    pub type FutureFramesContext = Box<[DecodedFrame<false>]>;
 
     impl Manager {
         /// This will verify all the signatures for the current frame
@@ -578,7 +573,7 @@ pub mod verification {
                 .state
                 .context
                 .signfile
-                .get_signatures_at(self.frame.timestamp);
+                .get_signatures_at(self.frame.time.start());
 
             stream::iter(sigs.zip(std::iter::repeat(self))).then(|(chunk, manager)| async move {
                 let cache_key = (
@@ -618,8 +613,23 @@ pub mod verification {
 
         /// Verifies a single chunk
         async fn verify_sig(&self, chunk: SignedInterval) -> SignatureState {
-            let end_frame =
-                self.convert_to_frames(chunk.stop()) - self.convert_to_frames(chunk.start());
+            // The end frame, we want to ceiling it, to be consistent with the
+            // floor when getting excess frames
+            let start_idx = chunk
+                .start()
+                .into_frames(self.fps(), self.state.offset)
+                .ceil() as usize;
+            let end_idx = chunk
+                .stop()
+                .into_frames(self.fps(), self.state.offset)
+                .ceil() as usize;
+            let Some(end_frame) = end_idx.checked_sub(start_idx) else {
+                return SignatureState::Invalid(
+                    SigOperationError::OutOfRange(chunk.start(), chunk.stop()).into(),
+                );
+            };
+            // (chunk.stop() - *chunk.start()).into_frames(self.fps(), Timestamp::ZERO);
+            // let end_frame = end_frame.round() as usize;
 
             let sig = &chunk.val;
 
@@ -639,6 +649,7 @@ pub mod verification {
             let frames_buf =
                 self.frame
                     .get_cropped_buffer(sig.pos, sig.size, 0..end_frame, &sig.channels);
+
             let frames_buf = match frames_buf {
                 Ok(b) => b,
                 Err(e) => return SignatureState::Invalid(e.into()),
@@ -659,12 +670,25 @@ pub mod verification {
         fn with_frames<'a>(
             &'a self,
             range: Range<usize>,
-        ) -> Box<dyn Iterator<Item = &'a FrameWithAudio> + 'a> {
-            Box::new(
-                vec![&self.raw]
-                    .into_iter()
-                    .chain(self.context[range].iter().filter_map(|a| a.1.as_ref().ok())),
-            )
+        ) -> Box<dyn Iterator<Item = &'a DecodedFrame<true>> + 'a> {
+            if range.start == 0 {
+                Box::new(
+                    vec![&self.raw].into_iter().chain(
+                        // Minus one from the range as we are adding one self.raw
+                        self.context[0..range.end - 1]
+                            .iter()
+                            .filter_map(|a| a.check_ref().ok()),
+                    ),
+                )
+            } else {
+                // Minus one from the indexes as technically we hare self.raw
+                // as the first
+                Box::new(
+                    self.context[range.start - 1..range.end - 1]
+                        .iter()
+                        .filter_map(|a| a.check_ref().ok()),
+                )
+            }
         }
     }
 }

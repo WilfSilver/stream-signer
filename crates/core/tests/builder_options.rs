@@ -8,14 +8,13 @@ use futures::{StreamExt, TryStreamExt};
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use serde_json::json;
 use stream_signer::{
+    SignFile, SignPipeline,
     time::Timestamp,
     utils::UnknownKey,
     video::{
-        sign,
+        SigOperationError, sign,
         verify::{InvalidSignatureError, SignatureState},
-        SigOperationError,
     },
-    SignFile, SignPipeline,
 };
 use testlibs::{
     client::{get_client, get_resolver},
@@ -294,7 +293,7 @@ async fn sign_and_verify_with_diff_start_offset() -> Result<(), Box<dyn Error>> 
                 };
 
                 async move {
-                    let time = v.state.frame.get_timestamp();
+                    let time = v.state.info.frame.get_timestamp();
                     let expected_invalid = time < Timestamp::from_secs_f64(2.1);
 
                     for s in &v.sigs {

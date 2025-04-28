@@ -43,7 +43,7 @@ impl<T> FramerateCompatible for T where
 /// assert_eq!(fps.frames(), 30);
 /// assert_eq!(fps.milliseconds(), 1_000); // 1 second as milliseconds
 ///
-/// assert_eq!(fps.convert_to_frames(Duration::from_millis(67)), 2);
+/// assert_eq!(fps.convert_to_frames(Duration::from_millis(67)) as usize, 2);
 /// ```
 #[derive(Debug, Clone, Copy)]
 pub struct Framerate<T>(T, T)
@@ -102,28 +102,32 @@ where
     /// This converts the given [Duration] into an index for the
     /// frame which is associated with that time frame.
     ///
-    /// Note if the framerate is over 1000fps, some frames my have the same
-    /// timestamp
+    /// The return type is [f64] so that the caller can then determine how they
+    /// wish to convert to indexes in different contexts
+    ///
+    /// It is highly recommended that you use the [crate::utils::float::RoundUnlessClose]
+    /// trait with this output due to precision issues when using Duratoin
     ///
     /// ```
     /// use std::time::Duration;
     /// use stream_signer::video::Framerate;
     ///
     /// let fps = Framerate::<usize>::new(30, 1);
-    /// // Due to us using `round`, half way past a frame will round up
-    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(10)), 0);
-    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(33)), 1);
-    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(66)), 2);
-    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(100)), 3);
+    /// // Note here that as we are rounding down 33 rounds to index 0 instead
+    /// // of 1 (even tho it is 33.3333). it is up to the user of this function
+    /// // to determine how to convert into usize
+    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(10)) as usize, 0);
+    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(33)) as usize, 0);
+    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(34)) as usize, 1);
+    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(65)) as usize, 1);
+    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(67)) as usize, 2);
+    /// assert_eq!(fps.convert_to_frames(Duration::from_millis(100)) as usize, 3);
     /// ```
     #[inline]
-    pub fn convert_to_frames(&self, duration: Duration) -> usize {
-        let res = (duration * <u32 as NumCast>::from(self.frames()).unwrap()).div_duration_f64(
+    pub fn convert_to_frames(&self, duration: Duration) -> f64 {
+        (duration * <u32 as NumCast>::from(self.frames()).unwrap()).div_duration_f64(
             Duration::from_secs(<u64 as NumCast>::from(self.seconds()).unwrap()),
-        );
-
-        // Rounds the number to be more accurate
-        res.round() as usize
+        )
     }
 
     /// This returns the amount of time a frame is expected to be visible for
@@ -211,7 +215,7 @@ mod tests {
 
         for (i, millis) in [0, 34, 67, 100, 134, 167, 200].into_iter().enumerate() {
             assert_eq!(
-                fps.convert_to_frames(Duration::from_millis(millis)),
+                fps.convert_to_frames(Duration::from_millis(millis)).round() as usize,
                 i,
                 "Converting {millis}ms to the frame equals {i}"
             );
@@ -224,7 +228,7 @@ mod tests {
 
         for i in 0..100 {
             assert_eq!(
-                fps.convert_to_frames(*fps.convert_to_time(i)),
+                fps.convert_to_frames(*fps.convert_to_time(i)).round() as usize,
                 i,
                 "Converting {i} to time and back again equals the same number"
             );

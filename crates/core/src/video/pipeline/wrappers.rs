@@ -1,8 +1,8 @@
 //! Stores basic wrappers around the GStreamer library
 
 use gst::{
-    prelude::{ElementExt, ElementExtManual},
     CoreError, SeekFlags, StateChangeSuccess,
+    prelude::{ElementExt, ElementExtManual},
 };
 
 use crate::{file::Timestamp, video::utils::get_bus_errors};
@@ -21,7 +21,7 @@ impl<T: ElementExt> SetState for T {
                 let (result, _curr, _pending) = self.state(timeout);
                 match result {
                     Ok(StateChangeSuccess::Success | StateChangeSuccess::NoPreroll) => {
-                        return Ok(())
+                        return Ok(());
                     }
 
                     // state change failed within timeout. Treat as error
@@ -65,7 +65,7 @@ impl<T: ElementExt> SetState for T {
 ///
 /// Note this does not implement [Drop] so that it can be cloned and
 /// shared, you are expected to run [Self::close] when you want to drop
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Pipeline(pub(super) gst::Pipeline);
 
 impl Pipeline {
@@ -85,10 +85,23 @@ impl Pipeline {
         self.set_state_blocking(gst::State::Playing)
     }
 
-    /// Sets the pipeline to the [gst::State::Null] state
+    /// Sets the pipeline to the [gst::State::Null] state, via [gst::State::Paused]
+    /// and [gst::State::Ready] to help clear memory leaks
     ///
     /// This is required to stop any memory leaks when the pipeline ends
     pub fn close(&self) -> Result<(), glib::Error> {
+        let state = self.0.state(None).1;
+
+        // Nothing needs doing if we are already in the null state
+        if state == gst::State::Null {
+            return Ok(());
+        }
+
+        if state == gst::State::Playing {
+            self.set_state_blocking(gst::State::Paused)?;
+            self.set_state_blocking(gst::State::Ready)?;
+        }
+
         self.set_state_blocking(gst::State::Null)
     }
 

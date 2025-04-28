@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::video::{iter::FrameIter, StreamError};
+use crate::video::{StreamError, iter::FrameIter};
 
 use super::{PipeInitiator, SignPipelineBuilder};
 
@@ -44,14 +44,17 @@ pub use verifying::*;
 mod verifying {
     use identity_iota::prelude::Resolver;
 
-    use futures::{stream, Stream, StreamExt};
+    use futures::{Stream, StreamExt, stream};
     use std::{pin::Pin, sync::Arc, time::Instant};
 
     use crate::{
+        SignFile,
         spec::MAX_CHUNK_LENGTH,
         utils::{Delayed, DelayedStream},
-        video::manager::verification::{self, SigVideoContext},
-        SignFile,
+        video::{
+            frame::DecodedFrame,
+            manager::verification::{self, SigVideoContext},
+        },
     };
 
     pub use crate::video::verify::{FrameWithSignatures, InvalidSignatureError, SignatureState};
@@ -99,7 +102,7 @@ mod verifying {
         ///             }
         ///         };
         ///
-        ///         let frame = &info.state.frame;
+        ///         let frame = &info.state.info.frame;
         ///         let sigs = &info.sigs;
         ///
         ///         // ...
@@ -123,16 +126,16 @@ mod verifying {
             let video_state = iter.state.clone();
             let synced = video_state.unsync_clock();
 
-            let mut iter = iter.enumerate().peekable();
+            let mut iter = iter.peekable();
 
             let buf_capacity = match iter.peek() {
                 Some(first) => first
-                    .1
                     .as_ref()
                     .map_err(|e| e.clone())?
                     .frame
                     .fps()
-                    .convert_to_frames(MAX_CHUNK_LENGTH),
+                    .convert_to_frames(MAX_CHUNK_LENGTH)
+                    .ceil() as usize,
                 None => 0,
             };
 
@@ -143,12 +146,21 @@ mod verifying {
                 .filter_map(|(d_info, state)| async {
                     match d_info {
                         Delayed::Partial(_) => None,
-                        Delayed::Full(a, fut) => Some(((a.0, a.1.clone(), fut), state)),
+                        Delayed::Full(a, fut) => Some(((a, fut), state)),
                     }
                 })
-                .then(move |(frame_state, video_state)| async move {
+                .then(move |((frame, future), video_state)| async move {
                     let start = Instant::now();
-                    let manager = match verification::Manager::new(video_state, frame_state) {
+                    let manager = match verification::Manager::new(
+                        video_state,
+                        (
+                            frame.into(),
+                            future
+                                .into_iter()
+                                .map(DecodedFrame::<false>::from)
+                                .collect::<Box<[_]>>(),
+                        ),
+                    ) {
                         Ok(m) => m,
                         Err(e) => return Err(e),
                     };
@@ -184,8 +196,8 @@ mod signing {
     use futures::{Stream, StreamExt};
     use std::{collections::VecDeque, future::Future, sync::Arc};
     use tokio::sync::{
-        mpsc::{self, UnboundedSender},
         Mutex,
+        mpsc::{self, UnboundedSender},
     };
     use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -193,13 +205,13 @@ mod signing {
         file::SignedInterval,
         spec::MAX_CHUNK_LENGTH,
         video::{
-            frame::FrameWithAudio,
+            FrameState, Signer, SigningError,
+            frame::DecodedFrame,
             manager::sign,
             sign::{
                 AsyncFnMutController, ChunkSignerBuilder, Controller, FnMutController,
                 MultiController, SingleController,
             },
-            FrameState, Signer, SigningError,
         },
     };
 
@@ -301,21 +313,21 @@ mod signing {
             S: Signer + 'static,
             C: Controller<S> + 'static,
         {
-            let mut iter = iter.zip_state().enumerate().peekable();
+            let mut iter = iter.zip_state().peekable();
 
             let buf_capacity = match iter.peek() {
                 Some(first) => first
                     .1
-                     .1
                     .as_ref()
                     .map_err(|e| e.clone())?
                     .frame
                     .fps()
-                    .convert_to_frames(MAX_CHUNK_LENGTH),
+                    .convert_to_frames(MAX_CHUNK_LENGTH)
+                    .ceil() as usize,
                 None => 0,
             };
 
-            let mut buf: VecDeque<FrameWithAudio> = VecDeque::new();
+            let mut buf: VecDeque<DecodedFrame<true>> = VecDeque::new();
             buf.reserve_exact(buf_capacity);
             let frame_buffer = Arc::new(Mutex::new(buf));
 
@@ -477,11 +489,12 @@ mod signing {
         /// let signer = Arc::new(identity);
         ///
         /// let mut is_first = true;
-        /// let sign_file = pipeline.sign(move |info| {
+        /// let sign_file = pipeline.sign(move |state| {
         ///   // ...
-        ///   if !info.time.is_start() && info.time.multiple_of(Duration::from_millis(100)) {
+        ///   let chunk_end = state.time.crosses_interval(Duration::from_millis(100));
+        ///   if !state.time.is_start() && chunk_end.is_some() {
         ///     let res = vec![
-        ///       ChunkSigner::build(info.time.start() - Duration::from_millis(100), signer.clone())
+        ///       ChunkSigner::build(chunk_end.unwrap() - Duration::from_millis(100), signer.clone())
         ///         .with_is_ref(!is_first),
         ///     ];
         ///     is_first = false;

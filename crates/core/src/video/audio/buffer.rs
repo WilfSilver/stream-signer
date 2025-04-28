@@ -68,7 +68,7 @@ use super::AudioSlice;
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct AudioBuffer {
     /// The raw vector of buffers
     pub buffer: VecDeque<Buffer>,
@@ -281,8 +281,8 @@ mod tests {
     use super::*;
 
     use crate::{
-        video::{manager::PipeState, Frame},
         SignPipeline,
+        video::{Frame, manager::PipeState},
     };
 
     use std::error::Error;

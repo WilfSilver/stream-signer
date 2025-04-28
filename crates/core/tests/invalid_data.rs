@@ -4,12 +4,12 @@ use std::error::Error;
 
 use futures::StreamExt;
 use stream_signer::{
+    SignFile, SignPipeline,
     utils::UnknownKey,
     video::{
-        verify::{InvalidSignatureError, SignatureState},
         SigOperationError,
+        verify::{InvalidSignatureError, SignatureState},
     },
-    SignFile, SignPipeline,
 };
 use testlibs::{client::get_resolver, test_video, videos};
 use utils::{skip_loading, test_client};

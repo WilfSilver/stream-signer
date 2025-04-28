@@ -4,7 +4,7 @@ use druid::{Data, Lens, PaintCtx, RenderContext, piet::CairoImage};
 use stream_signer::{
     time::Timestamp,
     utils::TimeRange,
-    video::{Frame, FrameState},
+    video::{FrameState, frame::DecodedFrame},
 };
 
 use crate::video::PlayerCtrl;
@@ -16,7 +16,7 @@ const HIDE_TIMEOUT: Duration = Duration::from_millis(2000);
 #[derive(Clone, Data, Debug)]
 pub struct FrameWithIdx {
     #[data(ignore)]
-    pub frame: Frame,
+    pub info: DecodedFrame<true>,
     #[data(ignore)]
     pub time: TimeRange,
     pub idx: usize,
@@ -25,9 +25,9 @@ pub struct FrameWithIdx {
 impl FrameWithIdx {
     pub fn get_curr_image(&self, ctx: &mut PaintCtx<'_, '_, '_>) -> CairoImage {
         ctx.make_image(
-            self.frame.width() as usize,
-            self.frame.height() as usize,
-            self.frame.raw_buffer(),
+            self.info.frame.width() as usize,
+            self.info.frame.height() as usize,
+            self.info.frame.raw_buffer(),
             druid::piet::ImageFormat::Rgb,
         )
         .expect("Could not create buffer")
@@ -38,7 +38,7 @@ impl From<&FrameState> for FrameWithIdx {
     fn from(value: &FrameState) -> Self {
         let idx = value.frame_idx();
         Self {
-            frame: value.frame.clone(),
+            info: value.info.clone(),
             time: value.time,
             idx,
         }
@@ -49,7 +49,7 @@ impl From<FrameState> for FrameWithIdx {
     fn from(value: FrameState) -> Self {
         let idx = value.frame_idx();
         Self {
-            frame: value.frame,
+            info: value.info,
             time: value.time,
             idx,
         }
@@ -88,16 +88,16 @@ impl<T: Clone + Data> VideoState<T> {
     pub fn get_curr_image(&self, ctx: &mut PaintCtx<'_, '_, '_>) -> Option<CairoImage> {
         self.curr_frame.as_ref().map(|info| {
             ctx.make_image(
-                info.frame.width() as usize,
-                info.frame.height() as usize,
-                info.frame.raw_buffer(),
+                info.info.frame.width() as usize,
+                info.info.frame.height() as usize,
+                info.info.frame.raw_buffer(),
                 druid::piet::ImageFormat::Rgb,
             )
             .expect("Could not create buffer")
         })
     }
 
-    pub fn update_frame(&mut self, frame: FrameState) {
+    pub fn update_frame(&mut self, frame: &FrameState) {
         self.duration = Some(frame.video.duration);
         self.progress = frame.time.start().as_secs_f64() / frame.video.duration.as_secs_f64();
         self.curr_frame = Some(frame.into());

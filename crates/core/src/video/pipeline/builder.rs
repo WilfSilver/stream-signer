@@ -5,14 +5,13 @@
 use std::{path::Path, sync::Arc};
 
 use futures::executor;
-use glib::object::Cast;
+use glib::object::{Cast, CastNone};
 use gst::{
-    caps,
+    ElementFactory, caps,
     element_factory::ElementBuilder,
     prelude::{ElementExt, ElementExtManual, GstBinExtManual, GstObjectExt, PadExt},
-    ElementFactory,
 };
-use gst_app::{app_sink::AppSinkBuilder, AppSink};
+use gst_app::{AppSink, app_sink::AppSinkBuilder};
 use tokio::sync::Mutex;
 
 use crate::file::Timestamp;
@@ -295,8 +294,12 @@ impl SignPipelineBuilder<'_> {
         let si = src_info.clone();
 
         // Connect the 'pad-added' signal to dynamically link the source to the converter
-        let pipe_clone = pipe.clone();
         src.connect_pad_added(move |src, src_pad| {
+            let pipe = src
+                .parent()
+                .and_downcast::<gst::Pipeline>()
+                .expect("SRC has pipeline has parent");
+
             let caps = src_pad.current_caps().expect("Could not get CAPS");
             let name = caps
                 .structure(0)
@@ -306,8 +309,7 @@ impl SignPipelineBuilder<'_> {
             if name.starts_with("audio/") {
                 // We only want to add audio components when they are necessary
                 // (e.g. audio exists in the video format)
-                pipe_clone
-                    .add_many([&audio_convert, audio_sink.upcast_ref()])
+                pipe.add_many([&audio_convert, audio_sink.upcast_ref()])
                     .expect("Couldn't add audioconvert and audiosink");
 
                 audio_convert
@@ -325,7 +327,7 @@ impl SignPipelineBuilder<'_> {
                     src_pad
                         .link(&sink_pad)
                         .expect("Could not link audio to src pad");
-                    println!("Connected audio");
+                    // println!("Connected audio");
                 }
             } else if name.starts_with("video/") {
                 let sink_pad = video_convert
@@ -336,7 +338,7 @@ impl SignPipelineBuilder<'_> {
                     src_pad
                         .link(&sink_pad)
                         .expect("Could not link video to src pad");
-                    println!("Connected video");
+                    // println!("Connected video");
                 }
             } else {
                 eprintln!("Got an extra pad added we didn't expect, ignoring")

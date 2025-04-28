@@ -9,9 +9,8 @@ use std::{
 };
 
 use druid::{Env, Event, EventCtx, ExtEventSink, Lens, LensExt};
-use futures::executor;
 use stream_signer::{gst::glib::property::PropertySet, video::Pipeline};
-use tokio::sync::Mutex;
+use tokio::{runtime, sync::Mutex};
 
 #[derive(Debug, Default, Clone)]
 pub struct PlayerCtrl {
@@ -48,7 +47,7 @@ impl Future for PlayerCtrl {
     type Output = ();
     fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         if self.paused.load(Ordering::Relaxed) {
-            executor::block_on(async {
+            runtime::Handle::current().block_on(async {
                 let mut waker = self.waker.lock().await;
                 *waker = Some(cx.waker().clone());
             });

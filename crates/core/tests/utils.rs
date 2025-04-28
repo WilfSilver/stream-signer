@@ -6,14 +6,14 @@ use futures::{StreamExt, TryStreamExt};
 use identity_iota::{core::FromJson, credential::Subject, did::DID};
 use serde_json::json;
 use stream_signer::{
+    SignFile, SignPipeline,
     video::{
         sign::{self, Controller},
         verify::SignatureState,
     },
-    SignFile, SignPipeline,
 };
 use testlibs::{
-    client::{get_client, get_resolver, MemClient},
+    client::{MemClient, get_client, get_resolver},
     identity::TestIdentity,
     issuer::TestIssuer,
     test_video, videos,
@@ -88,7 +88,8 @@ where
 
                     assert!(
                         matches!(s, SignatureState::Verified(_)),
-                        "{s:?} resolved correctly"
+                        "Frame: {:3?} has valid signature {s:?}",
+                        v.state.time,
                     );
                 }
             }

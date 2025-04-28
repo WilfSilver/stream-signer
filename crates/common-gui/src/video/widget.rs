@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use druid::{
     Code, Data, Event, LifeCycle, LifeCycleCtx, UnitPoint, Widget, WidgetExt, widget::ZStack,
 };
-use futures::executor;
+use tokio::runtime;
 
 use crate::{showif::ShowIfExt, state::VideoState};
 
@@ -61,7 +61,7 @@ impl<F: VideoFeed<VideoState<T>>, T: Clone + Data> Widget<VideoState<T>> for Vid
             Event::AnimFrame(_) => ctx.request_focus(),
             Event::KeyDown(id) if id.code == Code::Space => {
                 data.moved();
-                executor::block_on(self.flip_playing(data));
+                runtime::Handle::current().block_on(self.flip_playing(data));
                 ctx.request_update(); // It sometimes doesn't believe the data has been changed
                 ctx.set_handled();
             }

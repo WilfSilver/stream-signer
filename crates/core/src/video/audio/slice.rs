@@ -9,7 +9,7 @@ use super::buffer::rate_to_duration;
 
 /// This is the counter part to [super::AudioBuffer], storing information such
 /// that it can be seen
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct AudioSlice {
     /// The buffers which the slice is over
     buffers: Vec<Buffer>,
@@ -173,6 +173,25 @@ impl AudioSlice {
     }
 }
 
+// impl Clone for AudioSlice {
+//     /// Clone this video frame. This operation is (somewhat) cheap because it does not clone the underlying
+//     /// data (it actually relies on gstreamer's refcounting mechanism)
+//     fn clone(&self) -> Self {
+//         let mut buffers = Vec::new();
+//         buffers.reserve_exact(self.buffers.len());
+//         for buf in &self.buffers {
+//             buffers.push(buf.to_owned());
+//         }
+//         Self {
+//             buffers,
+//             start: self.start,
+//             end: self.end,
+//             pts_offset: self.pts_offset,
+//             info: self.info.clone(),
+//         }
+//     }
+// }
+
 #[cfg(test)]
 mod tests {
     use std::error::Error;
@@ -180,8 +199,8 @@ mod tests {
     use testlibs::{test_video, videos};
 
     use crate::{
-        video::{audio::AudioBuffer, manager::PipeState, Frame},
         SignPipeline,
+        video::{Frame, audio::AudioBuffer, manager::PipeState},
     };
 
     use super::*;

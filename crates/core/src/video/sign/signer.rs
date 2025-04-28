@@ -1,6 +1,6 @@
 use std::{future::Future, sync::Arc};
 
-use futures::{future::BoxFuture, FutureExt};
+use futures::{FutureExt, future::BoxFuture};
 use identity_iota::{
     credential::Jwt,
     document::CoreDocument,
@@ -8,7 +8,7 @@ use identity_iota::{
         JwkStorage, JwkStorageDocumentError, KeyId, KeyIdStorage, KeyIdStorageResult,
         KeyStorageResult, MethodDigest,
     },
-    verification::{jwk::Jwk, MethodData},
+    verification::{MethodData, jwk::Jwk},
 };
 
 use crate::{file::Timestamp, video::frame::FrameWithAudio};
@@ -41,7 +41,7 @@ pub trait Signer: Sync + Send {
 
     /// Wraps all the functions above, producing a clean interface to request
     fn sign<'a>(&'a self, msg: &'a [u8])
-        -> BoxFuture<'a, Result<Vec<u8>, JwkStorageDocumentError>>;
+    -> BoxFuture<'a, Result<Vec<u8>, JwkStorageDocumentError>>;
 }
 
 /// This is a simple trait for creating an easier trait to implement for
@@ -176,7 +176,7 @@ impl<S: IotaSigner> Signer for S {
                 .document()
                 .resolve_method(self.fragment(), None)
                 .ok_or(JwkStorageDocumentError::MethodNotFound)?;
-            let MethodData::PublicKeyJwk(ref jwk) = method.data() else {
+            let MethodData::PublicKeyJwk(jwk) = &method.data() else {
                 return Err(JwkStorageDocumentError::NotPublicKeyJwk);
             };
 
@@ -679,8 +679,10 @@ impl<S: Signer> ChunkSigner<S> {
             signer,
             pos: None,
             size: None,
-            start,
             is_ref: false,
+            // We floor the milliseconds here as we know the file only works
+            // to the closest millisecond
+            start: start.floor_millis(),
             channels: None,
         }
     }

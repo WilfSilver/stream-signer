@@ -27,7 +27,7 @@ pub const ONE_HOUR_MILLIS: u64 = 60 * ONE_MINUTE_MILLIS;
 /// accuracy is required basic [u64] as nanoseconds is used, as this is
 /// what GStreamer uses.
 #[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Timestamp(Duration);
+pub struct Timestamp(pub Duration);
 
 impl fmt::Debug for Timestamp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -79,14 +79,22 @@ impl Timestamp {
     /// Returns the number of frames over the next milliseconds, due to
     /// the signfile only working to the closest millisecond
     pub fn excess_frames(&self, fps: Framerate<usize>) -> usize {
-        fps.convert_to_frames(Duration::from_nanos(self.excess_nanos()))
+        fps.convert_to_frames(Duration::from_nanos(self.excess_nanos())) as usize
+    }
+
+    pub const fn floor_millis(self) -> Timestamp {
+        Timestamp::from_millis(self.0.as_millis() as u64)
+    }
+
+    pub fn round_millis(self) -> Timestamp {
+        Timestamp::from_millis((self.0.as_secs_f64() * ONE_SECOND_MILLIS as f64).round() as u64)
     }
 
     /// Converts the current milliseconds into the index to use for the frames
     ///
     /// - `fps` should be: (number of frames, number of seconds)
     /// - `start_offset` should be the number of milliseconds to start the video at
-    pub fn into_frames(&self, fps: Framerate<usize>, start_offset: Timestamp) -> usize {
+    pub fn into_frames(&self, fps: Framerate<usize>, start_offset: Timestamp) -> f64 {
         fps.convert_to_frames(*self - start_offset)
     }
 }

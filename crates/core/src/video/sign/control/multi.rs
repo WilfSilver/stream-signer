@@ -1,6 +1,6 @@
-use futures::{future::BoxFuture, stream, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, future::BoxFuture, stream};
 
-use crate::video::{sign::ChunkSignerBuilder, FrameState, Signer};
+use crate::video::{FrameState, Signer, sign::ChunkSignerBuilder};
 
 use super::{Controller, SingleController};
 

@@ -1,9 +1,9 @@
 use std::future::{self, Future};
 
-use futures::{future::BoxFuture, FutureExt};
+use futures::{FutureExt, future::BoxFuture};
 use tokio::sync::Mutex;
 
-use crate::video::{sign::ChunkSignerBuilder, FrameState, Signer};
+use crate::video::{FrameState, Signer, sign::ChunkSignerBuilder};
 
 use super::Controller;
 
@@ -56,9 +56,10 @@ use super::Controller;
 /// let signer = Arc::new(identity);
 ///
 /// let controller = sign::FnController(move |state| {
-///   if !state.time.is_start() && state.time.multiple_of(Duration::from_millis(100)) {
+///   let chunk_end = state.time.crosses_interval(Duration::from_millis(100));
+///   if !state.time.is_start() && chunk_end.is_some() {
 ///     let res = vec![
-///       ChunkSigner::build(state.time.start() - Duration::from_millis(100), signer.clone()),
+///       ChunkSigner::build(chunk_end.unwrap() - Duration::from_millis(100), signer.clone()),
 ///     ];
 ///     res
 ///   } else {
@@ -155,9 +156,10 @@ where
 /// let controller = sign::AsyncFnController(move |state| {
 ///   let signer = signer.clone();
 ///   async move {
-///     if !state.time.is_start() && state.time.multiple_of(Duration::from_millis(100)) {
+///     let chunk_end = state.time.crosses_interval(Duration::from_millis(100));
+///     if !state.time.is_start() && chunk_end.is_some() {
 ///       let res = vec![
-///         ChunkSigner::build(state.time.start() - Duration::from_millis(100), signer.clone()),
+///         ChunkSigner::build(chunk_end.unwrap() - Duration::from_millis(100), signer.clone()),
 ///       ];
 ///
 ///       // ... await ...
@@ -261,9 +263,10 @@ where
 ///
 /// let mut is_first = true;
 /// let controller = sign::FnMutController::new(move |state| {
-///   if !state.time.is_start() && state.time.multiple_of(Duration::from_millis(100)) {
+///   let chunk_end = state.time.crosses_interval(Duration::from_millis(100));
+///   if !state.time.is_start() && chunk_end.is_some() {
 ///     let res = vec![
-///       ChunkSigner::build(state.time.start() - Duration::from_millis(100), signer.clone())
+///       ChunkSigner::build(chunk_end.unwrap() - Duration::from_millis(100), signer.clone())
 ///         .with_is_ref(!is_first),
 ///     ];
 ///     is_first = false;
