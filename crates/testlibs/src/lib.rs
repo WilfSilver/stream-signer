@@ -13,7 +13,8 @@ pub mod videos {
     pub const BIG_BUNNY: &str = "Big_Buck_Bunny_360_10s_1MB.mp4";
     pub const BIG_BUNNY_LONG: &str = "Big_Buck_Bunny_20s_Silent.mp4";
     pub const BIG_BUNNY_1080: &str = "Big_Buck_Bunny_1080_10s_25fps.mp4";
-    pub const BIG_BUNNY_EMBED: &str = "Big_Buck_Bunny_1080_embed.mp4";
+    pub const BIG_BUNNY_EMBED: &str = "Big_Buck_Bunny_540_embed.mp4";
+    pub const BIG_BUNNY_EMBED_SRC: &str = "Big_Buck_Bunny_360_embed_source.mp4";
     pub const BIG_BUNNY_AUDIO: &str = "Big_Buck_Bunny_10s_Audio.mp4";
     pub const BIG_BUNNY_AUDIO_6C: &str = "Big_Buck_Bunny_10s_Audio_6_channels.mp4";
     pub const BIG_BUNNY_AUDIO_LEFT: &str = "Big_Buck_Bunny_10s_Audio_Left.mp4";
