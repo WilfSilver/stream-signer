@@ -94,6 +94,9 @@ impl Timestamp {
     ///
     /// - `fps` should be: (number of frames, number of seconds)
     /// - `start_offset` should be the number of milliseconds to start the video at
+    ///
+    /// The need for `start_offset` is because when that is given, the indexes
+    /// do not account for that and so are relative to the start offset.
     pub fn into_frames(&self, fps: Framerate<usize>, start_offset: Timestamp) -> f64 {
         fps.convert_to_frames(*self - start_offset)
     }
