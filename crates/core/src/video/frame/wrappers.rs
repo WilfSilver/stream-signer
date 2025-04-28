@@ -70,7 +70,9 @@ impl Deref for DecodedFrame<true> {
 /// in one place as well as some additional context.
 #[derive(Debug)]
 pub struct FrameWithAudio {
-    /// The index in which the frame appeared
+    /// The index in which the frame appeared, please note that this may be
+    /// inaccurate to the video itself due to having a start offset,
+    /// [Frame::get_timestamp] should be used instead
     pub idx: usize,
     /// The wrapper for the [gst_video::VideoFrame] to get access it its
     /// information

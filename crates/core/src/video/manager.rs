@@ -51,7 +51,8 @@ pub trait FrameBuffer {
         let frames = self.with_frames(range);
 
         for f in frames {
-            frames_buf.extend(f.cropped_buffer(pos, size, channels)?);
+            let frame = f.cropped_buffer(pos, size, channels)?.collect::<Vec<_>>();
+            frames_buf.extend(frame);
         }
 
         Ok(frames_buf)
