@@ -40,6 +40,30 @@ impl AudioSlice {
         }
     }
 
+    /// Returns the number of **bytes** this slice is for, including all the data
+    pub fn len(&self) -> usize {
+        let buf_len = self.per_buffer_len();
+
+        buf_len * (self.buffers.len() - 1) + self.end.unwrap_or(buf_len) - self.start
+    }
+
+    /// Returns the expected number of bytes per channel
+    #[inline]
+    pub fn per_channel_bytes(&self) -> usize {
+        self.len() / self.channels()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.buffers.is_empty()
+            || (self.buffers.len() == 1
+                && self.end.unwrap_or_else(|| self.per_buffer_len()) == self.start)
+    }
+
+    #[inline]
+    fn per_buffer_len(&self) -> usize {
+        self.buffers[0].map_readable().unwrap().len()
+    }
+
     /// Returns the timestamp of where this slice begins in nanoseconds, this
     /// should roughly equal [crate::video::Frame::get_timestamp] but may not
     /// be exact as it is calculated separately
@@ -154,10 +178,11 @@ impl AudioSlice {
     ///
     /// Note that the order of the channels is the same order as the given
     /// vector
-    pub fn cropped_buffer<'a>(
-        &'a self,
-        channels: &'a [usize],
-    ) -> Result<impl Iterator<Item = u8> + 'a, SigOperationError> {
+    pub fn cropped_buffer(
+        &self,
+        dest: &mut [u8],
+        channels: &[usize],
+    ) -> Result<usize, SigOperationError> {
         let max = self.channels();
         let mut invalid_channels = channels.iter().filter(|x| **x >= max).peekable();
 
@@ -167,30 +192,23 @@ impl AudioSlice {
             ));
         }
 
-        Ok(channels
-            .iter()
-            .flat_map(|i| self.unchecked_channel_buffer(*i)))
+        let mut offset = 0;
+        for c in channels {
+            for b in self.unchecked_channel_buffer(*c) {
+                dest[offset] = b;
+                offset += 1;
+            }
+        }
+
+        Ok(offset)
+    }
+
+    /// Predicts the size of the buffer required to call [Self::cropped_buffer]
+    #[inline]
+    pub fn cropped_buffer_size(&self, channels: &[usize]) -> usize {
+        self.per_channel_bytes() * channels.len()
     }
 }
-
-// impl Clone for AudioSlice {
-//     /// Clone this video frame. This operation is (somewhat) cheap because it does not clone the underlying
-//     /// data (it actually relies on gstreamer's refcounting mechanism)
-//     fn clone(&self) -> Self {
-//         let mut buffers = Vec::new();
-//         buffers.reserve_exact(self.buffers.len());
-//         for buf in &self.buffers {
-//             buffers.push(buf.to_owned());
-//         }
-//         Self {
-//             buffers,
-//             start: self.start,
-//             end: self.end,
-//             pts_offset: self.pts_offset,
-//             info: self.info.clone(),
-//         }
-//     }
-// }
 
 #[cfg(test)]
 mod tests {
@@ -250,10 +268,13 @@ mod tests {
     fn correct_crop() -> Result<(), Box<dyn Error>> {
         let slice = get_first_slice(videos::BIG_BUNNY_AUDIO)?;
 
-        let full_crop = slice
-            .cropped_buffer(&[0, 1])
-            .expect("Should be able to create crop")
-            .collect::<Vec<_>>();
+        let channels = [0, 1];
+        let mut full_crop = vec![0; slice.cropped_buffer_size(&channels)];
+
+        let offset = slice
+            .cropped_buffer(&mut full_crop, &channels)
+            .expect("Should be able to create crop");
+        assert_eq!(offset, full_crop.len(), "Predicted buffer size correct");
 
         let expected_length = slice.buffers[0].map_readable().unwrap().len() + slice.end.unwrap();
         assert_eq!(
@@ -263,10 +284,13 @@ mod tests {
         );
 
         for c in 0..1 {
-            let channel_crop = slice
-                .cropped_buffer(&[c])
-                .expect("Should be able to create crop")
-                .collect::<Vec<_>>();
+            let channels = [c];
+            let mut channel_crop = vec![0; slice.cropped_buffer_size(&channels)];
+            let offset = slice
+                .cropped_buffer(&mut channel_crop, &[c])
+                .expect("Should be able to create crop");
+
+            assert_eq!(offset, channel_crop.len(), "Predicted buffer size correct");
 
             assert_eq!(
                 channel_crop.len(),
@@ -282,11 +306,14 @@ mod tests {
     fn invalid_crop() -> Result<(), Box<dyn Error>> {
         let slice = get_first_slice(videos::BIG_BUNNY_AUDIO)?;
 
-        let crop = slice.cropped_buffer(&[0, 3, 8]);
+        let channels = [0, 3, 8];
+        let mut crop = vec![0; slice.cropped_buffer_size(&channels)];
+
+        let offset = slice.cropped_buffer(&mut crop, &channels);
 
         assert!(
             matches!(
-                crop,
+                offset,
                 Err(SigOperationError::InvalidChannels(channels))
                     if channels == vec![3, 8]),
             "Found error when trying to crop with invalid buffer"

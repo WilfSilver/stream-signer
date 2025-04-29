@@ -91,17 +91,31 @@ impl FrameWithAudio {
     /// It will also do the checking if the given crop is within the bounds of
     /// the image, if it is not it will return a [SigOperationError::InvalidCrop] or
     /// [SigOperationError::InvalidChannels]
-    pub fn cropped_buffer<'a>(
-        &'a self,
+    pub fn cropped_buffer(
+        &self,
+        dest: &mut [u8],
         pos: Vec2u,
         size: Vec2u,
-        channels: &'a [usize],
-    ) -> Result<Box<dyn Iterator<Item = u8> + 'a>, SigOperationError> {
-        let frame = self.frame.cropped_buffer(pos, size)?;
-        Ok(match &self.audio {
-            Some(audio) => Box::new(frame.chain(audio.cropped_buffer(channels)?)),
-            None => Box::new(frame),
-        })
+        channels: &[usize],
+    ) -> Result<usize, SigOperationError> {
+        let mut offset = self.frame.cropped_buffer(dest, pos, size)?;
+
+        if let Some(audio) = &self.audio {
+            offset += audio.cropped_buffer(dest, channels)?;
+        }
+
+        Ok(offset)
+    }
+
+    /// Predicts the size of `dest` param needs to be to call [Self::cropped_buffer]
+    #[inline]
+    pub fn cropped_buffer_size(&self, size: Vec2u, channels: &[usize]) -> usize {
+        self.frame.cropped_buffer_size(size)
+            + self
+                .audio
+                .as_ref()
+                .map(|a| a.cropped_buffer_size(channels))
+                .unwrap_or_default()
     }
 }
 
@@ -116,6 +130,8 @@ pub struct Frame {
 }
 
 impl Frame {
+    const DEPTH: usize = 3;
+
     pub fn new(sample: gst::Sample, pts_offset: Duration) -> Self {
         let caps = sample.caps().expect("Sample without caps");
         let info = gst_video::VideoInfo::from_caps(caps).expect("Failed to parse caps");
@@ -154,6 +170,12 @@ impl Frame {
         }
     }
 
+    /// Predicts the number of bytes the cropped buffer will be
+    #[inline]
+    pub const fn cropped_buffer_size(&self, size: Vec2u) -> usize {
+        Self::DEPTH * size.x as usize * size.y as usize
+    }
+
     /// This returns the bytes which are within the given bounds determined by
     /// `pos` and `size`
     ///
@@ -161,9 +183,10 @@ impl Frame {
     /// the image, if it is not it will return a [SigOperationError::InvalidCrop]
     pub fn cropped_buffer(
         &self,
+        dest: &mut [u8],
         pos: Vec2u,
         size: Vec2u,
-    ) -> Result<impl Iterator<Item = u8> + '_, SigOperationError> {
+    ) -> Result<usize, SigOperationError> {
         if pos.x + size.x > self.width()
             || pos.y + size.y > self.height()
             || size.x == 0 // Means we are signing nothing and there's no point in that
@@ -174,22 +197,27 @@ impl Frame {
 
         let buf = self.raw_buffer();
 
-        const DEPTH: usize = 3;
-        let start_idx = DEPTH * (pos.x + pos.y * self.width()) as usize;
+        let start_idx = Self::DEPTH * (pos.x + pos.y * self.width()) as usize;
         // This ends on the first pixel outside the value (which is why we don't add `size.x`)
-        let end_idx = DEPTH * (pos.x + (pos.y + size.y) * self.width()) as usize;
+        let end_idx = Self::DEPTH * (pos.x + (pos.y + size.y) * self.width()) as usize;
 
-        let row_size = DEPTH * size.x as usize;
+        let row_size = Self::DEPTH * size.x as usize;
 
-        let bit_width = DEPTH * self.width() as usize;
-        let it = buf[start_idx..end_idx]
-            .iter()
-            .enumerate()
-            .filter(move |(i, _)| i % bit_width < row_size)
-            .map(|(_, v)| v)
-            .cloned();
+        let byte_width = Self::DEPTH * self.width() as usize;
+        let mut offset = 0;
+        for start in (start_idx..end_idx).step_by(byte_width) {
+            dest[offset..offset + row_size].copy_from_slice(&buf[start..start + row_size]);
+            offset += row_size;
+        }
 
-        Ok(it)
+        // let it = buf[start_idx..end_idx]
+        //     .iter()
+        //     .enumerate()
+        //     .filter(move |(i, _)| i % byte_width < row_size)
+        //     .map(|(_, v)| v)
+        //     .cloned();
+
+        Ok(offset)
     }
 
     /// Returns the number of nanoseconds this frame should appear at, also
@@ -336,11 +364,24 @@ mod tests {
                 .expect("There is not at least one frame in the video")
                 .expect("Frame was not able to be decoded from video");
 
-            let full_crop = first
+            let size = first.frame.dimensions().into();
+
+            let mut full_crop = vec![0; first.frame.cropped_buffer_size(size)];
+
+            let offset = first
                 .frame
-                .cropped_buffer(Vec2u::default(), first.frame.dimensions().into())
-                .expect("Cropped video correctly")
-                .collect::<Vec<_>>();
+                .cropped_buffer(
+                    &mut full_crop,
+                    Vec2u::default(),
+                    first.frame.dimensions().into(),
+                )
+                .expect("Cropped video correctly");
+
+            assert_eq!(
+                offset,
+                full_crop.len(),
+                "Predicted size from cropped_buffer_size is correct"
+            );
 
             assert_eq!(
                 full_crop.len(),
@@ -349,11 +390,18 @@ mod tests {
             );
 
             let size = Vec2u::new(100, 100);
-            let crop = first
+            let mut crop = vec![0; first.frame.cropped_buffer_size(size)];
+
+            let offset = first
                 .frame
-                .cropped_buffer(Vec2u::new(10, 10), size)
-                .expect("Cropped video correctly")
-                .collect::<Vec<_>>();
+                .cropped_buffer(&mut crop, Vec2u::new(10, 10), size)
+                .expect("Cropped video correctly");
+
+            assert_eq!(
+                offset,
+                crop.len(),
+                "Predicted size from cropped_buffer_size is correct"
+            );
 
             assert_eq!(
                 crop.len(),
@@ -409,11 +457,12 @@ mod tests {
         ];
 
         for (pos, size) in tests {
-            let crop = first.frame.cropped_buffer(pos, size);
+            let mut crop = vec![0; first.frame.cropped_buffer_size(size)];
+            let offset = first.frame.cropped_buffer(&mut crop, pos, size);
 
             assert!(
                 matches!(
-                    crop,
+                    offset,
                     Err(SigOperationError::InvalidCrop(epos, esize))
                         if epos == pos && esize == size,
                 ),

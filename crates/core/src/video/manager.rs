@@ -37,6 +37,8 @@ pub trait FrameBuffer {
     /// This is quite a slow function, all tactics to reduce this time have
     /// been tried, the fact is that cloning this amount of data into a vector
     /// is just quite slow
+    ///
+    /// We assume that all frames are the same size
     fn get_cropped_buffer(
         &self,
         pos: Vec2u,
@@ -51,21 +53,18 @@ pub trait FrameBuffer {
             return Ok(Vec::new());
         };
 
-        let num_channels = channels.len();
-
-        let frame_size = 3 * size.x as usize * size.y as usize
-            + first
-                .audio
-                .as_ref()
-                .map(|a| a.per_channel_bytes() * num_channels)
-                .unwrap_or_default();
+        let frame_size = first.cropped_buffer_size(size, channels);
 
         let capacity = frame_size * frames_len;
         let mut frames_buf: Vec<u8> = Vec::new();
         frames_buf.reserve_exact(capacity);
 
         for f in frames {
-            frames_buf.extend(f.cropped_buffer(pos, size, channels)?);
+            // We have to do it on a per frame basis due to the potential issue
+            // of different frames being of different sizes
+            let mut slice = vec![0; f.cropped_buffer_size(size, channels)];
+            f.cropped_buffer(&mut slice, pos, size, channels)?;
+            frames_buf.extend(slice);
         }
 
         Ok(frames_buf)
