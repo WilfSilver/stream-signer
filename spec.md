@@ -1,6 +1,6 @@
 # Cryptographic Streamed Video Signing and Verification
 
-Issue tracker: https://github.com/WilfSilver/stream-signer/issues
+Issue tracker: [github.com/WilfSilver/stream-signer/issues](https://github.com/WilfSilver/stream-signer/issues)
 
 ## Introduction
 
