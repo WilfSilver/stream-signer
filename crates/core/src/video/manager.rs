@@ -37,6 +37,8 @@ pub trait FrameBuffer {
     /// This is quite a slow function, all tactics to reduce this time have
     /// been tried, the fact is that cloning this amount of data into a vector
     /// is just quite slow
+    ///
+    /// We assume that all frames are the same size
     fn get_cropped_buffer(
         &self,
         pos: Vec2u,
@@ -44,15 +46,25 @@ pub trait FrameBuffer {
         range: Range<usize>,
         channels: &[usize],
     ) -> Result<Vec<u8>, SigOperationError> {
-        let capacity = 3 * size.x as usize * size.y as usize * range.len();
+        let frames_len = range.len();
+        let mut frames = self.with_frames(range).peekable();
+
+        let Some(first) = frames.peek() else {
+            return Ok(Vec::new());
+        };
+
+        let frame_size = first.cropped_buffer_size(size, channels);
+
+        let capacity = frame_size * frames_len;
         let mut frames_buf: Vec<u8> = Vec::new();
         frames_buf.reserve_exact(capacity);
 
-        let frames = self.with_frames(range);
-
         for f in frames {
-            let frame = f.cropped_buffer(pos, size, channels)?.collect::<Vec<_>>();
-            frames_buf.extend(frame);
+            // We have to do it on a per frame basis due to the potential issue
+            // of different frames being of different sizes
+            let mut slice = vec![0; f.cropped_buffer_size(size, channels)];
+            f.cropped_buffer(&mut slice, pos, size, channels)?;
+            frames_buf.extend(slice);
         }
 
         Ok(frames_buf)

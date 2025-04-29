@@ -29,8 +29,6 @@ Once these are installed you should be able to just do
 cargo build --release
 ```
 
-Note: That `--release` should be used for basically everything, otherwise the signing process is extremely slow.
-
 ### Testing
 
 To test both the integraiton and doc tests simply run:
