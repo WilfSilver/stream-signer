@@ -44,15 +44,28 @@ pub trait FrameBuffer {
         range: Range<usize>,
         channels: &[usize],
     ) -> Result<Vec<u8>, SigOperationError> {
-        let capacity = 3 * size.x as usize * size.y as usize * range.len();
+        let frames_len = range.len();
+        let mut frames = self.with_frames(range).peekable();
+
+        let Some(first) = frames.peek() else {
+            return Ok(Vec::new());
+        };
+
+        let num_channels = channels.len();
+
+        let frame_size = 3 * size.x as usize * size.y as usize
+            + first
+                .audio
+                .as_ref()
+                .map(|a| a.per_channel_bytes() * num_channels)
+                .unwrap_or_default();
+
+        let capacity = frame_size * frames_len;
         let mut frames_buf: Vec<u8> = Vec::new();
         frames_buf.reserve_exact(capacity);
 
-        let frames = self.with_frames(range);
-
         for f in frames {
-            let frame = f.cropped_buffer(pos, size, channels)?.collect::<Vec<_>>();
-            frames_buf.extend(frame);
+            frames_buf.extend(f.cropped_buffer(pos, size, channels)?);
         }
 
         Ok(frames_buf)
