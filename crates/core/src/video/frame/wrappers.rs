@@ -62,7 +62,7 @@ impl Deref for DecodedFrame<true> {
     type Target = FrameWithAudio;
 
     fn deref(&self) -> &Self::Target {
-        self.0.as_ref().as_ref().unwrap()
+        unsafe { self.0.as_ref().as_ref().unwrap_unchecked() }
     }
 }
 
@@ -170,7 +170,8 @@ impl Frame {
         }
     }
 
-    /// Predicts the number of bytes the cropped buffer will be
+    /// Predicts the number of bytes the required length of the input for
+    /// [Self::cropped_buffer].
     #[inline]
     pub const fn cropped_buffer_size(&self, size: Vec2u) -> usize {
         Self::DEPTH * size.x as usize * size.y as usize
@@ -181,6 +182,9 @@ impl Frame {
     ///
     /// It will also do the checking if the given crop is within the bounds of
     /// the image, if it is not it will return a [SigOperationError::InvalidCrop]
+    ///
+    /// * `dest` is the destination slice for the bytes and should be of size
+    ///   [Self::cropped_buffer_size]. This is done for efficiency
     pub fn cropped_buffer(
         &self,
         dest: &mut [u8],
@@ -209,13 +213,6 @@ impl Frame {
             dest[offset..offset + row_size].copy_from_slice(&buf[start..start + row_size]);
             offset += row_size;
         }
-
-        // let it = buf[start_idx..end_idx]
-        //     .iter()
-        //     .enumerate()
-        //     .filter(move |(i, _)| i % byte_width < row_size)
-        //     .map(|(_, v)| v)
-        //     .cloned();
 
         Ok(offset)
     }
@@ -282,20 +279,6 @@ impl Frame {
         self.raw.info()
     }
 }
-
-// impl Clone for Frame {
-//     /// Clone this video frame. This operation is cheap because it does not clone the underlying
-//     /// data (it actually relies on gstreamer's refcounting mechanism)
-//     fn clone(&self) -> Self {
-//         let buffer = self.raw.buffer_owned();
-//         let frame = gst_video::VideoFrame::from_buffer_readable(buffer, self.raw.info())
-//             .expect("Failed to map buffer readable");
-//         Self {
-//             raw: frame,
-//             pts: self.pts,
-//         }
-//     }
-// }
 
 impl GenericImageView for Frame {
     type Pixel = image::Rgb<u8>;

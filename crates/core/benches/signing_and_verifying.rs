@@ -75,31 +75,6 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     group.finish();
 }
 
-struct SignParams {
-    pub video: String,
-    pub interval: Duration,
-    pub signer: Arc<TestIdentity>,
-}
-
-impl Display for SignParams {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} | {:?}", &self.video, self.interval)
-    }
-}
-
-struct VerifyParams {
-    pub video: String,
-    pub resolver: Arc<Resolver>,
-    pub interval: Duration,
-    pub signfile: SignFile,
-}
-
-impl Display for VerifyParams {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} | {:?}", &self.video, self.interval)
-    }
-}
-
 fn test_all_chunk_sizes(
     runtime: &Runtime,
     c: &mut BenchmarkGroup<'_, WallTime>,
@@ -113,6 +88,18 @@ fn test_all_chunk_sizes(
         Duration::from_millis(1000),
         MAX_CHUNK_LENGTH - Duration::from_millis(41),
     ] {
+        struct SignParams {
+            pub video: String,
+            pub interval: Duration,
+            pub signer: Arc<TestIdentity>,
+        }
+
+        impl Display for SignParams {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{} | {:?}", &self.video, self.interval)
+            }
+        }
+
         let params = SignParams {
             video: video.to_owned(),
             interval: duration,
@@ -121,16 +108,26 @@ fn test_all_chunk_sizes(
 
         c.bench_with_input(BenchmarkId::new("Signing", &params), &params, |b, info| {
             b.to_async(runtime).iter(|| async {
-                assert!(
-                    sign(&info.video, info.interval, info.signer.clone())
-                        .await
-                        .is_ok()
-                )
+                let res = sign(&info.video, info.interval, info.signer.clone()).await;
+                assert!(res.is_ok(), "{:?} was able to be created", res.err())
             })
         });
 
         // We have to get the signfile separately
         if let Ok(signfile) = runtime.block_on(sign(video, duration, signer.clone())) {
+            struct VerifyParams {
+                pub video: String,
+                pub resolver: Arc<Resolver>,
+                pub interval: Duration,
+                pub signfile: SignFile,
+            }
+
+            impl Display for VerifyParams {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "{} | {:?}", &self.video, self.interval)
+                }
+            }
+
             let params = VerifyParams {
                 video: video.to_owned(),
                 interval: duration,
@@ -140,15 +137,32 @@ fn test_all_chunk_sizes(
 
             c.bench_with_input(BenchmarkId::new("Verify", &params), &params, |b, info| {
                 b.to_async(runtime).iter(|| async {
-                    assert!(
-                        verify(video, info.resolver.clone(), info.signfile.clone())
-                            .await
-                            .is_ok()
-                    )
+                    let res = verify(video, info.resolver.clone(), info.signfile.clone()).await;
+                    assert!(res.is_ok(), "{:?} was able to be created", res.err())
                 })
             });
         }
     }
+
+    c.bench_with_input(BenchmarkId::new("Decoding", video), video, |b, video| {
+        b.to_async(runtime).iter(|| async {
+            let res = decode(video).await;
+            assert!(res.is_ok(), "{:?} was able to be decoded", res.err())
+        })
+    });
+}
+
+async fn decode(video: &str) -> Result<usize, Box<dyn Error>> {
+    let filepath = test_video(video);
+
+    let pipe = SignPipeline::build_from_path(&filepath).unwrap().build()?;
+
+    let mut i = 0;
+    for s in pipe.try_into_iter(())? {
+        i = s.unwrap().idx;
+    }
+
+    Ok(i)
 }
 
 async fn sign(
