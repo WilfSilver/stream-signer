@@ -7,7 +7,10 @@ mod constants;
 use std::{error::Error, time::Duration};
 
 use constants::ONE_HUNDRED_MILLIS;
-use stream_signer::{spec::{MAX_CHUNK_LENGTH, MIN_CHUNK_LENGTH}, video::sign};
+use stream_signer::{
+    spec::{MAX_CHUNK_LENGTH, MIN_CHUNK_LENGTH},
+    video::sign,
+};
 use testlibs::videos;
 use utils::{sign_and_verify_int, sign_and_verify_multi, sign_and_verify_multi_together};
 
