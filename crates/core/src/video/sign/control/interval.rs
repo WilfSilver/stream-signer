@@ -203,6 +203,3 @@ impl<S: Signer + 'static> SingleController<S> for IntervalController<S> {
         .boxed()
     }
 }
-
-// TODO:
-// - Tests to make sure there is only one def
