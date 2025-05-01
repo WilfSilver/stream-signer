@@ -20,7 +20,7 @@ For the requirements, they are the same as [`gstreamer-rs`](https://gstreamer.fr
 So for ubuntu you would need to run:
 
 ```sh
-sudo apt install -y libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav libgstrtspserver-1.0-dev libges-1.0-dev libglib2.0-dev libgtk-3-dev
+sudo apt install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav libgstrtspserver-1.0-dev libges-1.0-dev libglib2.0-dev libgtk-3-dev
 ```
 
 Once these are installed you should be able to just do
@@ -31,7 +31,14 @@ cargo build --release
 
 ### Testing
 
-To test both the integraiton and doc tests simply run:
+The test videos are stored on LFS, meaning that you need to install and pull `git-lfs` e.g. for ubuntu:
+
+```sh
+sudo apt install git-lfs
+git lfs pull
+```
+
+Then to test both the integraiton and doc tests simply run:
 
 ```sh
 cargo test

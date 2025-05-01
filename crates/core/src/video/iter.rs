@@ -21,8 +21,6 @@ use super::{
 ///
 /// Assumptions made:
 /// - Frame rate is not >1000
-///
-/// TODO: Examples
 #[derive(Debug)]
 pub struct FrameIter<VC> {
     /// The state of the iterator, storing key information about the
@@ -212,6 +210,3 @@ impl<VC> Iterator for FrameIter<VC> {
         }
     }
 }
-
-// TODO: Tests
-// - Check that there is frame with audio for every frame for video

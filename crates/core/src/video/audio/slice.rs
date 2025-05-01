@@ -178,6 +178,9 @@ impl AudioSlice {
     ///
     /// Note that the order of the channels is the same order as the given
     /// vector
+    ///
+    /// * `dest` is the destination slice for the bytes and should be of size
+    ///   [Self::cropped_buffer_size]. This is done for efficiency
     pub fn cropped_buffer(
         &self,
         dest: &mut [u8],
