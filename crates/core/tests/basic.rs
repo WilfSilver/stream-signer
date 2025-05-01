@@ -1,13 +1,12 @@
-// TODO:
-// - Count the signatures generated
-// - Invalid between two different videos
-
 mod constants;
 
 use std::{error::Error, time::Duration};
 
 use constants::ONE_HUNDRED_MILLIS;
-use stream_signer::{spec::MAX_CHUNK_LENGTH, video::sign};
+use stream_signer::{
+    spec::{MAX_CHUNK_LENGTH, MIN_CHUNK_LENGTH},
+    video::sign,
+};
 use testlibs::videos;
 use utils::{sign_and_verify_int, sign_and_verify_multi, sign_and_verify_multi_together};
 
@@ -25,6 +24,14 @@ async fn sign_and_verify() -> Result<(), Box<dyn Error>> {
 async fn sign_and_verify_near_max() -> Result<(), Box<dyn Error>> {
     sign_and_verify_int(videos::BIG_BUNNY_LONG, |i| {
         sign::IntervalController::build(i, MAX_CHUNK_LENGTH - Duration::from_millis(34))
+    })
+    .await
+}
+
+#[tokio::test]
+async fn sign_and_verify_near_min() -> Result<(), Box<dyn Error>> {
+    sign_and_verify_int(videos::BIG_BUNNY_LONG, |i| {
+        sign::IntervalController::build(i, MIN_CHUNK_LENGTH + Duration::from_millis(1))
     })
     .await
 }
