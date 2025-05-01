@@ -620,9 +620,9 @@ there for a long conversations about both the specification and also Rust.
 
 ## References
 
-**\[JSON\]** -- The JavaScript Object Notation (JSON) Data Interchange Format. T. Bray, Ed.. IETF. December 2017. Internet Standard. URL: https://www.rfc-editor.org/rfc/rfc8259
+**\[JSON\]** -- The JavaScript Object Notation (JSON) Data Interchange Format. T. Bray, Ed.. IETF. December 2017. Internet Standard. URL: <https://www.rfc-editor.org/rfc/rfc8259>
 
-**\[RFC7519\]** -- JSON Web Token (JWT). M. Jones, J. Bradley, N. Sakimura. May 2015. Internet Standard: https://www.rfc-editor.org/rfc/rfc8259
+**\[RFC7519\]** -- JSON Web Token (JWT). M. Jones, J. Bradley, N. Sakimura. May 2015. Internet Standard: <https://www.rfc-editor.org/rfc/rfc8259>
 
-**\[VERIFIABLE-CREDENTIAL\]** -- Verifiable Credentials Data Model v2.0. M. Sporny, D. Longley, D. Chadwick, I. Herman. March 2025. URL: https://www.w3.org/TR/vc-data-model-2.0/
+**\[VERIFIABLE-CREDENTIAL\]** -- Verifiable Credentials Data Model v2.0. M. Sporny, D. Longley, D. Chadwick, I. Herman. March 2025. URL: <https://www.w3.org/TR/vc-data-model-2.0/>
 
