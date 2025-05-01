@@ -179,8 +179,9 @@ impl AudioBuffer {
         }
 
         let buffer_length_ns = self.buffer_duration(&self.buffer[0]).as_nanos();
-        let end_ns = (frame_end - self.get_timestamp()).as_nanos();
-        let mut rem_ns = end_ns % buffer_length_ns;
+        // End nanoseconds relative to the start of all buffers stored
+        let rel_end_ns = (frame_end - self.get_timestamp()).as_nanos();
+        let mut rem_ns = rel_end_ns % buffer_length_ns;
         // Accounts for floating point issues
         if rem_ns < 5 {
             rem_ns = 0;
@@ -188,15 +189,16 @@ impl AudioBuffer {
         let consumes_last_buf = rem_ns == 0;
 
         let required_length = if consumes_last_buf {
-            end_ns / buffer_length_ns
+            rel_end_ns / buffer_length_ns
         } else {
-            end_ns.div_ceil(buffer_length_ns)
+            rel_end_ns.div_ceil(buffer_length_ns)
         } as usize;
 
         if self.buffer.len() < required_length {
             return None;
         }
 
+        // End nanoseconds relative to the last buffer for which the frame ends
         let rel_end = Duration::from_nanos(rem_ns as u64);
 
         let pop_length = required_length - if consumes_last_buf { 0 } else { 1 };
