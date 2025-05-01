@@ -1,7 +1,3 @@
-// TODO:
-// - Count the signatures generated
-// - Invalid between two different videos
-
 mod constants;
 
 use std::{error::Error, time::Duration};

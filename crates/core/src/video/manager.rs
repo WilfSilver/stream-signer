@@ -378,8 +378,6 @@ pub mod sign {
 
     /// Makes it easily create a manager from an iterator, it is done as such
     /// mostly to make it easier to integrate into existing solutions e.g.
-    ///
-    /// TODO: Examples
     pub async fn manage<S, C>(
         ((state, frame), buffer): SigningItem<S, C>,
     ) -> Result<Manager<S, C>, SigningError>

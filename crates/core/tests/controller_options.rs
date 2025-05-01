@@ -94,5 +94,3 @@ async fn sign_and_verify_with_range() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
-
-// TODO: Use all other controllers
